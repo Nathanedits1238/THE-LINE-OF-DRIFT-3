@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">The Line Of Drift</string>
+    <string name="title_story">Modo História (Luca &amp; Miguel)</string>
+    <string name="title_career">Carreira &amp; Open World</string>
+    <string name="title_garage">Garagem &amp; Tuning</string>
+    <string name="title_multiplayer">Multiplayer (Salas 4 Dígitos)</string>
+    <string name="title_challenges">Desafios Extremos</string>
+    <string name="title_achievements">Conquistas &amp; Badges</string>
+    <string name="title_leaderboard">Ranking Global</string>
+    <string name="title_settings">Configurações</string>
+</resources>

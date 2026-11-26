@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="noir_bg">#08090C</color>
+    <color name="noir_surface">#111318</color>
+    <color name="noir_accent">#D4A24C</color>
+    <color name="noir_text">#EFEDE7</color>
+</resources>
