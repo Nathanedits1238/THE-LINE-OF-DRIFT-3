@@ -31,12 +31,16 @@ interface ServerPlayer {
 
 interface ServerRoom {
   code: string;
+  name?: string;
   trackId: string;
   hostId: string;
   hostName: string;
   status: 'lobby' | 'racing' | 'finished';
   players: Map<string, ServerPlayer>;
   createdAt: number;
+  isOfficial?: boolean;
+  sessionExpiresAt: number;
+  bonusUnlockedBy?: string | null;
 }
 
 interface LeaderboardRecord {
@@ -143,6 +147,47 @@ function persistServerState(state: PersistentServerState) {
 const serverState = loadServerState();
 const rooms = new Map<string, ServerRoom>();
 
+// Initialize 4 Official Public Timed Servers (1 hour duration until reset)
+const OFFICIAL_SERVERS = [
+  { code: '1001', name: 'Servidor Oficial #1 - Metrópole Neon', trackId: 'track_city' },
+  { code: '1002', name: 'Servidor Oficial #2 - Dutos Industriais', trackId: 'track_docks' },
+  { code: '1003', name: 'Servidor Oficial #3 - Costa do Golfo', trackId: 'track_coast' },
+  { code: '1004', name: 'Servidor Oficial #4 - Deserto Midnight', trackId: 'track_desert' },
+];
+
+for (const s of OFFICIAL_SERVERS) {
+  rooms.set(s.code, {
+    code: s.code,
+    name: s.name,
+    trackId: s.trackId,
+    hostId: 'system_official',
+    hostName: 'Servidor Oficial',
+    status: 'lobby',
+    players: new Map(),
+    createdAt: Date.now(),
+    isOfficial: true,
+    sessionExpiresAt: Date.now() + 3600000,
+    bonusUnlockedBy: null,
+  });
+}
+
+// Periodic ticker to check official server session expiration (1 hour limit)
+setInterval(() => {
+  const now = Date.now();
+  for (const [code, room] of rooms.entries()) {
+    if (room.isOfficial && now >= room.sessionExpiresAt) {
+      broadcastToRoom(code, {
+        type: 'ROOM_EXPIRED',
+        error: 'Sessão de 1 hora expirada. O servidor público foi resetado.',
+      });
+      room.players.clear();
+      room.sessionExpiresAt = now + 3600000;
+      room.bonusUnlockedBy = null;
+      room.status = 'lobby';
+    }
+  }
+}, 1000);
+
 interface ClientSocketMeta {
   ws: WebSocket;
   playerId: string | null;
@@ -157,12 +202,19 @@ function serializeRoom(room: ServerRoom) {
     if (b.lap !== a.lap) return b.lap - a.lap;
     return b.progress - a.progress;
   });
+  const now = Date.now();
+  const timeRemainingSec = Math.max(0, Math.round((room.sessionExpiresAt - now) / 1000));
   return {
     code: room.code,
+    name: room.name,
     trackId: room.trackId,
     hostName: room.hostName,
     status: room.status,
     createdAt: room.createdAt,
+    isOfficial: room.isOfficial || false,
+    sessionDurationSec: 3600,
+    timeRemainingSec,
+    bonusUnlockedBy: room.bonusUnlockedBy || null,
     players,
   };
 }
@@ -364,16 +416,43 @@ async function startServer() {
       }
 
       if (type === 'LIST_ROOMS') {
+        const now = Date.now();
         const list = Array.from(rooms.values()).map((room) => ({
           code: room.code,
+          name: room.name,
           trackId: room.trackId,
           hostName: room.hostName,
           status: room.status,
           playerCount: room.players.size,
           maxPlayers: 8,
           createdAt: room.createdAt,
+          isOfficial: room.isOfficial || false,
+          sessionDurationSec: 3600,
+          timeRemainingSec: Math.max(0, Math.round((room.sessionExpiresAt - now) / 1000)),
+          bonusUnlockedBy: room.bonusUnlockedBy || null,
         }));
         sendJson(ws, { type: 'ROOMS_LIST', rooms: list });
+        return;
+      }
+
+      if (type === 'EXTEND_SESSION') {
+        if (!meta.roomCode) return;
+        const room = rooms.get(meta.roomCode);
+        if (!room || !room.isOfficial) return;
+        const repLevel = Math.max(0, Number(msg.repLevel) || 0);
+        if (repLevel < 50) {
+          sendJson(ws, {
+            type: 'ROOM_ERROR',
+            error: 'Nível de Reputação insuficiente! É necessário Nível 50 (Nível alto) para estender a sessão do servidor.',
+          });
+          return;
+        }
+        room.sessionExpiresAt += 1800000; // +30 mins
+        room.bonusUnlockedBy = String(msg.playerName || 'Piloto Elite').slice(0, 28);
+        broadcastToRoom(room.code, {
+          type: 'ROOM_STATE',
+          room: serializeRoom(room),
+        });
         return;
       }
 

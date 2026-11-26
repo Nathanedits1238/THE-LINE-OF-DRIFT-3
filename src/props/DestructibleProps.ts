@@ -59,6 +59,7 @@ export class DestructiblePropSystem {
   private yellowLightMat!: THREE.MeshBasicMaterial;
   private greenLightMat!: THREE.MeshBasicMaterial;
   private lampHeadMat!: THREE.MeshBasicMaterial;
+  private currentLightScale: number = 1.0;
 
   private static readonly _carToProp = new THREE.Vector3();
   private static readonly _reboundImpulse = new THREE.Vector3();
@@ -390,6 +391,21 @@ export class DestructiblePropSystem {
     return this.createLampPost(new THREE.Vector3(x, 0, z), heading);
   }
 
+  public getLampHeadMaterial(): THREE.MeshBasicMaterial {
+    return this.lampHeadMat;
+  }
+
+  public setStreetLightScale(scale: number) {
+    this.currentLightScale = scale;
+    const isLit = scale > 0.02;
+    for (let i = 0; i < this.props.length; i++) {
+      const p = this.props[i];
+      if (!p.lightSource || p.isBroken) continue;
+      p.lightSource.visible = isLit;
+      p.lightSource.intensity = isLit ? 1.4 * scale : 0;
+    }
+  }
+
   public checkCollision(
     playerPos: THREE.Vector3,
     playerVel: THREE.Vector3,
@@ -590,7 +606,9 @@ export class DestructiblePropSystem {
     p.group.position.copy(p.initialPos);
     p.group.rotation.set(0, p.initialHeading, 0);
     if (p.lightSource) {
-      p.lightSource.intensity = 1.4;
+      const isLit = this.currentLightScale > 0.02;
+      p.lightSource.visible = isLit;
+      p.lightSource.intensity = isLit ? 1.4 * this.currentLightScale : 0;
     }
   }
 

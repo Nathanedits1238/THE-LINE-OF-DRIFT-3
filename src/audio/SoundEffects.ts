@@ -51,6 +51,19 @@ export class SoundEngine {
   // Pre-allocated noise buffer for zero GC audio
   private sharedNoiseBuffer: AudioBuffer | null = null;
 
+  // Voice-over playback queue (Alan tutorial narration & game voice clips)
+  private activeVoiceAudio: HTMLAudioElement | null = null;
+  private activeVoiceVolume: number = 0.92;
+  private voiceQueue: Array<{
+    src: string;
+    volume?: number;
+    onStart?: () => void;
+    onEnd?: () => void;
+  }> = [];
+  private preloadedVoiceMap: Map<string, HTMLAudioElement> = new Map();
+  private voicePlaybackToken: number = 0;
+  private pendingVoiceUnlockCleanup: (() => void) | null = null;
+
   constructor() {
     // Initialized on user interaction to comply with browser autoplay policies
   }
@@ -98,11 +111,122 @@ export class SoundEngine {
         this.ctx.currentTime
       );
     }
+    if (this.activeVoiceAudio) {
+      this.activeVoiceAudio.volume = this.muted ? 0 : this.activeVoiceVolume;
+    }
     return this.muted;
   }
 
   public isMuted(): boolean {
     return this.muted;
+  }
+
+  public preloadVoiceClips(urls: string[]) {
+    for (const url of urls) {
+      if (this.preloadedVoiceMap.has(url)) continue;
+      const audio = new Audio(url);
+      audio.preload = 'auto';
+      this.preloadedVoiceMap.set(url, audio);
+    }
+  }
+
+  public playVoiceSequence(
+    clips: Array<{
+      src: string;
+      volume?: number;
+      onStart?: () => void;
+      onEnd?: () => void;
+    }>
+  ) {
+    this.stopVoiceClips();
+    if (!clips.length) return;
+    this.voiceQueue = [...clips];
+    this.playNextVoiceClip(this.voicePlaybackToken);
+  }
+
+  private playNextVoiceClip(token: number) {
+    if (token !== this.voicePlaybackToken) return;
+    const nextClip = this.voiceQueue.shift();
+    if (!nextClip) {
+      this.activeVoiceAudio = null;
+      return;
+    }
+
+    const audio = new Audio(nextClip.src);
+    audio.preload = 'auto';
+    this.activeVoiceVolume = nextClip.volume ?? 0.92;
+    audio.volume = this.muted ? 0 : this.activeVoiceVolume;
+    this.activeVoiceAudio = audio;
+
+    let finished = false;
+    const finishClip = () => {
+      if (finished) return;
+      finished = true;
+      if (this.activeVoiceAudio === audio) {
+        this.activeVoiceAudio = null;
+      }
+      if (token === this.voicePlaybackToken) {
+        nextClip.onEnd?.();
+        this.playNextVoiceClip(token);
+      }
+    };
+
+    audio.addEventListener('ended', finishClip, { once: true });
+    audio.addEventListener('error', finishClip, { once: true });
+
+    nextClip.onStart?.();
+    const playPromise = audio.play();
+    if (playPromise && typeof playPromise.catch === 'function') {
+      playPromise.catch(() => {
+        if (token !== this.voicePlaybackToken) return;
+        this.clearPendingVoiceUnlock();
+        const retryPlay = () => {
+          this.clearPendingVoiceUnlock();
+          if (token !== this.voicePlaybackToken || this.activeVoiceAudio !== audio) return;
+          audio.volume = this.muted ? 0 : this.activeVoiceVolume;
+          void audio.play().catch(finishClip);
+        };
+        window.addEventListener('pointerdown', retryPlay, { once: true });
+        window.addEventListener('keydown', retryPlay, { once: true });
+        this.pendingVoiceUnlockCleanup = () => {
+          window.removeEventListener('pointerdown', retryPlay);
+          window.removeEventListener('keydown', retryPlay);
+        };
+      });
+    }
+  }
+
+  private clearPendingVoiceUnlock() {
+    this.pendingVoiceUnlockCleanup?.();
+    this.pendingVoiceUnlockCleanup = null;
+  }
+
+  public pauseVoiceClip() {
+    if (this.activeVoiceAudio && !this.activeVoiceAudio.paused) {
+      this.activeVoiceAudio.pause();
+    }
+  }
+
+  public resumeVoiceClip() {
+    if (this.activeVoiceAudio && this.activeVoiceAudio.paused && !this.activeVoiceAudio.ended) {
+      this.activeVoiceAudio.volume = this.muted ? 0 : this.activeVoiceVolume;
+      void this.activeVoiceAudio.play().catch(() => {});
+    }
+  }
+
+  public stopVoiceClips() {
+    this.voicePlaybackToken++;
+    this.voiceQueue = [];
+    this.clearPendingVoiceUnlock();
+    if (this.activeVoiceAudio) {
+      this.activeVoiceAudio.pause();
+      try {
+        this.activeVoiceAudio.currentTime = 0;
+      } catch {
+        // Ignore seek errors on unbuffered audio elements
+      }
+      this.activeVoiceAudio = null;
+    }
   }
 
   // Engine synthesizer
@@ -824,6 +948,7 @@ export class SoundEngine {
     if (this.tireResonanceGain) this.tireResonanceGain.gain.setValueAtTime(0, t);
     if (this.sirenEchoWetGain) this.sirenEchoWetGain.gain.setValueAtTime(0, t);
     if (this.tunnelWetGain) this.tunnelWetGain.gain.setValueAtTime(0, t);
+    this.stopVoiceClips();
   }
 }
 

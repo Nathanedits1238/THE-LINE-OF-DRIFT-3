@@ -239,13 +239,13 @@ export class CityNPCSystem {
     if (waypoints.length < 10) return;
 
     const npcCount =
-      trackId === 'track_city'
-        ? 44
-        : trackId === 'track_docks'
-          ? 24
-          : trackId === 'track_coast'
-            ? 20
-            : 12;
+      trackId === 'track_city' || trackId === 'track_neon_tokyo'
+        ? 120
+        : trackId === 'track_san_bernard'
+          ? 105
+          : trackId === 'track_docks' || trackId === 'track_alpine'
+            ? 80
+            : 70;
 
     const isUnsafeSpot = (x: number, z: number): boolean => {
       for (let i = 0; i < colliders.length; i++) {
@@ -347,6 +347,8 @@ export class CityNPCSystem {
     }
   }
 
+  public densityMultiplier: number = 1.0;
+
   public update(
     dt: number,
     playerPos: THREE.Vector3,
@@ -362,9 +364,14 @@ export class CityNPCSystem {
     const maxVisibleSq = 155 * 155;
     const animateDistSq = 110 * 110;
     const isPlayerOnGround = playerPos.y < 2.2;
+    const activeLimit = Math.floor(this.agents.length * this.densityMultiplier);
 
     for (let i = 0; i < this.agents.length; i++) {
       const a = this.agents[i];
+      if (i >= activeLimit) {
+        a.group.visible = false;
+        continue;
+      }
       const dx = a.group.position.x - playerPos.x;
       const dz = a.group.position.z - playerPos.z;
       const distSq = dx * dx + dz * dz;

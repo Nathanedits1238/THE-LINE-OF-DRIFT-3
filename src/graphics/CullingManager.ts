@@ -14,11 +14,16 @@ export class CullingManager {
   private projScreenMatrix: THREE.Matrix4 = new THREE.Matrix4();
   private cullables: CullableObject[] = [];
   public maxRenderDistance: number = 240;
+  public streetLightScale: number = 1.0;
 
   // Stats
   public totalRegistered: number = 0;
   public visibleCount: number = 0;
   public culledCount: number = 0;
+
+  public setStreetLightScale(scale: number) {
+    this.streetLightScale = THREE.MathUtils.clamp(scale, 0, 2.5);
+  }
 
   public setQuality(quality: GraphicsQuality) {
     switch (quality) {
@@ -76,6 +81,15 @@ export class CullingManager {
       const item = this.cullables[i];
       const sphere = item.boundingSphere;
 
+      if (item.isLight && this.streetLightScale <= 0.02) {
+        item.object.visible = false;
+        if (item.object instanceof THREE.Light) {
+          item.object.intensity = 0;
+        }
+        culled++;
+        continue;
+      }
+
       // Distance test to player / camera
       const dx = sphere.center.x - playerPos.x;
       const dz = sphere.center.z - playerPos.z;
@@ -97,12 +111,15 @@ export class CullingManager {
         continue;
       }
 
-      // Special Light Occlusion Culling
+      // Special Light Occlusion Culling scaled by real-time day-night factor
       if (item.isLight && item.object instanceof THREE.Light) {
         if (distSq > lightMaxDistSq) {
           item.object.intensity = 0;
+          item.object.visible = false;
+          culled++;
+          continue;
         } else {
-          item.object.intensity = item.baseIntensity || 1.0;
+          item.object.intensity = (item.baseIntensity || 1.0) * this.streetLightScale;
         }
       }
 

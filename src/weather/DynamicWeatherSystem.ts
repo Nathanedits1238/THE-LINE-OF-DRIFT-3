@@ -1,5 +1,8 @@
 import * as THREE from 'three';
 import { sound } from '../audio/SoundEffects';
+import { CityNPCSystem } from '../city/CityNPCs';
+import { CullingManager } from '../graphics/CullingManager';
+import { DestructiblePropSystem } from '../props/DestructibleProps';
 import { GraphicsQuality, TimeOfDay, WeatherType } from '../types';
 
 export interface WeatherConditionInfo {
@@ -15,6 +18,15 @@ export interface WeatherConditionInfo {
   roadRoughness: number;
   roadMetalness: number;
   description: string;
+}
+
+export interface DayNightClockInfo {
+  phase: TimeOfDay;
+  label: string;
+  icon: string;
+  clockText: string;
+  sunElevation: number;
+  isNight: boolean;
 }
 
 export const WEATHER_CONDITIONS: Record<WeatherType, WeatherConditionInfo> = {
@@ -97,6 +109,8 @@ export class DynamicWeatherSystem {
   public currentBrakingMultiplier: number = 1.35;
   public currentFogDensity: number = 0.0055;
   public currentSunIntensity: number = 1.4;
+  private currentWeatherSunFactor: number = 0.65;
+  public currentStreetLightLevel: number = 1.0;
 
   // Lightning dynamics during storm
   public isLightningActive: boolean = false;
@@ -108,10 +122,42 @@ export class DynamicWeatherSystem {
   private rainPositions: Float32Array | null = null;
   private rainCount: number = 1200;
 
-  // Scene references (set by CityGenerator or Scene)
+  // Scene references & Day-Night Cycle
   public sunLight: THREE.DirectionalLight | null = null;
   public hemiLight: THREE.HemisphereLight | null = null;
+  public streetLights: THREE.PointLight[] = [];
+  public lampBulbMaterials: THREE.MeshBasicMaterial[] = [];
+  public culling: CullingManager | null = null;
+  public npcsSystem: CityNPCSystem | null = null;
+  public destructibleProps: DestructiblePropSystem | null = null;
   public roadMaterials: THREE.MeshStandardMaterial[] = [];
+
+  // 0.0 = 00:00 Midnight, 0.25 = 06:00 Dawn, 0.50 = 12:00 Noon, 0.75 = 18:00 Sunset
+  public dayNightProgress: number = 0.85;
+  public dayCycleDuration: number = 180; // 3 minutes per full 24h cycle
+  public dayNightCycleEnabled: boolean = true;
+
+  // Zero-GC color interpolation helpers
+  private static readonly _cNightSky = new THREE.Color(0x060a14);
+  private static readonly _cDawnSky = new THREE.Color(0xd96b43);
+  private static readonly _cDaySky = new THREE.Color(0x90b9e2);
+  private static readonly _cSunsetSky = new THREE.Color(0xc85432);
+  private static readonly _cSunNight = new THREE.Color(0x284070);
+  private static readonly _cSunWarm = new THREE.Color(0xff7f42);
+  private static readonly _cSunDay = new THREE.Color(0xfff8eb);
+  private static readonly _cHemiNightSky = new THREE.Color(0x111a2e);
+  private static readonly _cHemiWarmSky = new THREE.Color(0xd47148);
+  private static readonly _cHemiDaySky = new THREE.Color(0x95c8f8);
+  private static readonly _cHemiNightGnd = new THREE.Color(0x070a10);
+  private static readonly _cHemiDayGnd = new THREE.Color(0x3a4959);
+  private static readonly _cWeatherTint = new THREE.Color();
+  private static readonly _cWorkSky = new THREE.Color();
+  private static readonly _cWorkSun = new THREE.Color();
+  private static readonly _cWorkHemiSky = new THREE.Color();
+  private static readonly _cWorkHemiGnd = new THREE.Color();
+  private static readonly _cBulbOff = new THREE.Color(0x3c434d);
+  private static readonly _cBulbOn = new THREE.Color(0xfff0bb);
+  private static readonly _cBulbWork = new THREE.Color();
 
   // Callbacks
   public onWeatherChanged?: (weather: WeatherType, info: WeatherConditionInfo) => void;
@@ -122,15 +168,80 @@ export class DynamicWeatherSystem {
     const safeWeather: WeatherType = WEATHER_CONDITIONS[initialWeather] ? initialWeather : 'rain';
     this.currentWeather = safeWeather;
     this.targetWeather = safeWeather;
-    this.timeOfDay = initialTime;
+    this.setTimeOfDay(initialTime);
 
     const info = WEATHER_CONDITIONS[safeWeather] || WEATHER_CONDITIONS.rain;
     this.currentGripMultiplier = info.gripMultiplier;
     this.currentBrakingMultiplier = info.brakingMultiplier;
     this.currentFogDensity = info.fogDensity;
+    this.currentWeatherSunFactor = info.sunIntensity / 2.6;
     this.currentSunIntensity = info.sunIntensity;
 
     this.setupRainParticles();
+  }
+
+  public setTimeOfDay(timeOfDay: TimeOfDay) {
+    this.timeOfDay = timeOfDay;
+    switch (timeOfDay) {
+      case 'midnight':
+        this.dayNightProgress = 0.0;
+        break;
+      case 'night':
+        this.dayNightProgress = 0.86;
+        break;
+      case 'sunset':
+        this.dayNightProgress = 0.74;
+        break;
+      case 'day':
+        this.dayNightProgress = 0.5;
+        break;
+    }
+  }
+
+  public getClockInfo(): DayNightClockInfo {
+    const p = ((this.dayNightProgress % 1) + 1) % 1;
+    const totalMinutes = Math.floor(p * 24 * 60);
+    const hours = Math.floor(totalMinutes / 60) % 24;
+    const mins = totalMinutes % 60;
+    const clockText = `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
+
+    const sunAngle = p * Math.PI * 2 - Math.PI / 2;
+    const sunY = Math.sin(sunAngle);
+
+    let phase: TimeOfDay = 'day';
+    let label = 'DIA';
+    let icon = '☀️';
+
+    if (hours >= 5 && hours < 8) {
+      phase = 'sunset';
+      label = 'AMANHECER';
+      icon = '🌅';
+    } else if (hours >= 8 && hours < 17) {
+      phase = 'day';
+      label = 'DIA';
+      icon = '☀️';
+    } else if (hours >= 17 && hours < 20) {
+      phase = 'sunset';
+      label = 'ENTARDECER';
+      icon = '🌇';
+    } else if (hours >= 20 && hours < 23) {
+      phase = 'night';
+      label = 'NOITE';
+      icon = '🌙';
+    } else {
+      phase = 'midnight';
+      label = 'MADRUGADA';
+      icon = '🌌';
+    }
+
+    return {
+      phase,
+      label,
+      icon,
+      clockText,
+      sunElevation: sunY,
+      isNight: sunY < 0.12,
+    };
   }
 
   public setupRainParticles() {
@@ -185,24 +296,25 @@ export class DynamicWeatherSystem {
    * Sets new weather with optional smooth transition or instantaneous snap.
    */
   public setWeather(newWeather: WeatherType, immediate: boolean = false) {
-    if (this.targetWeather === newWeather && !immediate) return;
+    const safeWeather = WEATHER_CONDITIONS[newWeather] ? newWeather : 'rain';
+    if (this.targetWeather === safeWeather && !immediate) return;
 
-    this.targetWeather = newWeather;
+    this.targetWeather = safeWeather;
     if (immediate) {
-      this.currentWeather = newWeather;
+      this.currentWeather = safeWeather;
       this.transitionAlpha = 1.0;
-      const info = WEATHER_CONDITIONS[newWeather];
+      const info = WEATHER_CONDITIONS[safeWeather] || WEATHER_CONDITIONS['rain'];
       this.currentGripMultiplier = info.gripMultiplier;
       this.currentBrakingMultiplier = info.brakingMultiplier;
       this.currentFogDensity = info.fogDensity;
-      this.currentSunIntensity = info.sunIntensity;
+      this.currentWeatherSunFactor = info.sunIntensity / 2.6;
     } else {
       this.transitionAlpha = 0.0;
     }
 
     this.weatherCycleTimer = 0;
-    const targetInfo = WEATHER_CONDITIONS[newWeather];
-    this.onWeatherChanged?.(newWeather, targetInfo);
+    const targetInfo = WEATHER_CONDITIONS[safeWeather] || WEATHER_CONDITIONS['rain'];
+    this.onWeatherChanged?.(safeWeather, targetInfo);
   }
 
   public cycleNextWeather(): WeatherType {
@@ -235,7 +347,7 @@ export class DynamicWeatherSystem {
       }
     }
 
-    // 2. Smooth weather transition interpolation
+    // 2. Smooth weather transition interpolation (does NOT clobber day-night intensity)
     if (this.transitionAlpha < 1.0) {
       this.transitionAlpha += dt / this.transitionDuration;
       if (this.transitionAlpha >= 1.0) {
@@ -243,14 +355,14 @@ export class DynamicWeatherSystem {
         this.currentWeather = this.targetWeather;
       }
 
-      const fromInfo = WEATHER_CONDITIONS[this.currentWeather];
-      const toInfo = WEATHER_CONDITIONS[this.targetWeather];
+      const fromInfo = WEATHER_CONDITIONS[this.currentWeather] || WEATHER_CONDITIONS['rain'];
+      const toInfo = WEATHER_CONDITIONS[this.targetWeather] || WEATHER_CONDITIONS['rain'];
       const t = THREE.MathUtils.smoothstep(this.transitionAlpha, 0, 1);
 
       this.currentGripMultiplier = THREE.MathUtils.lerp(fromInfo.gripMultiplier, toInfo.gripMultiplier, t);
       this.currentBrakingMultiplier = THREE.MathUtils.lerp(fromInfo.brakingMultiplier, toInfo.brakingMultiplier, t);
       this.currentFogDensity = THREE.MathUtils.lerp(fromInfo.fogDensity, toInfo.fogDensity, t);
-      this.currentSunIntensity = THREE.MathUtils.lerp(fromInfo.sunIntensity, toInfo.sunIntensity, t);
+      this.currentWeatherSunFactor = THREE.MathUtils.lerp(fromInfo.sunIntensity / 2.6, toInfo.sunIntensity / 2.6, t);
 
       const targetRoughness = THREE.MathUtils.lerp(fromInfo.roadRoughness, toInfo.roadRoughness, t);
       const targetMetalness = THREE.MathUtils.lerp(fromInfo.roadMetalness, toInfo.roadMetalness, t);
@@ -259,14 +371,151 @@ export class DynamicWeatherSystem {
         this.roadMaterials[i].metalness = targetMetalness;
       }
     } else {
-      const info = WEATHER_CONDITIONS[this.currentWeather];
+      const info = WEATHER_CONDITIONS[this.currentWeather] || WEATHER_CONDITIONS['rain'];
       this.currentGripMultiplier = info.gripMultiplier;
       this.currentBrakingMultiplier = info.brakingMultiplier;
       this.currentFogDensity = info.fogDensity;
-      this.currentSunIntensity = info.sunIntensity;
+      this.currentWeatherSunFactor = info.sunIntensity / 2.6;
     }
 
-    // 3. Lightning Flash generator in Storm
+    // 3. Real-time Day-Night Cycle (lighting intensities, sky/fog blend, street lights, NPC density)
+    if (this.dayNightCycleEnabled) {
+      this.dayNightProgress += dt / this.dayCycleDuration;
+      if (this.dayNightProgress >= 1.0) this.dayNightProgress %= 1.0;
+    }
+
+    const p = this.dayNightProgress;
+    const sunAngle = p * Math.PI * 2 - Math.PI / 2;
+    const sunY = Math.sin(sunAngle); // -1 midnight, 0 dawn/sunset, +1 noon
+    const sunX = Math.cos(sunAngle);
+
+    // Day factor (0 at night, 1 at bright day) and golden twilight factor (peaks near sunY == 0)
+    const dayFactor = THREE.MathUtils.smoothstep(sunY, -0.18, 0.38);
+    const twilightFactor = Math.max(0, 1 - Math.abs(sunY) / 0.34);
+    const isSunsetHalf = p > 0.5;
+
+    // Update sky, sun, and hemisphere light colors smoothly without allocations
+    const skyWarmTarget = isSunsetHalf
+      ? DynamicWeatherSystem._cSunsetSky
+      : DynamicWeatherSystem._cDawnSky;
+
+    DynamicWeatherSystem._cWorkSky.copy(DynamicWeatherSystem._cNightSky).lerp(
+      DynamicWeatherSystem._cDaySky,
+      dayFactor
+    );
+    DynamicWeatherSystem._cWorkSky.lerp(skyWarmTarget, twilightFactor * 0.65);
+
+    // Blend sky color slightly toward storm/rain/fog mood
+    const weatherOverlayStrength =
+      this.currentWeather === 'storm'
+        ? 0.78
+        : this.currentWeather === 'rain'
+          ? 0.45
+          : this.currentWeather === 'fog'
+            ? 0.4
+            : 0.0;
+    if (weatherOverlayStrength > 0) {
+      const wInfo = WEATHER_CONDITIONS[this.currentWeather];
+      DynamicWeatherSystem._cWeatherTint.setHex(wInfo.fogColor);
+      DynamicWeatherSystem._cWorkSky.lerp(DynamicWeatherSystem._cWeatherTint, weatherOverlayStrength);
+    }
+
+    DynamicWeatherSystem._cWorkSun.copy(DynamicWeatherSystem._cSunNight).lerp(
+      DynamicWeatherSystem._cSunDay,
+      dayFactor
+    );
+    DynamicWeatherSystem._cWorkSun.lerp(DynamicWeatherSystem._cSunWarm, twilightFactor * 0.8);
+
+    DynamicWeatherSystem._cWorkHemiSky.copy(DynamicWeatherSystem._cHemiNightSky).lerp(
+      DynamicWeatherSystem._cHemiDaySky,
+      dayFactor
+    );
+    DynamicWeatherSystem._cWorkHemiSky.lerp(DynamicWeatherSystem._cHemiWarmSky, twilightFactor * 0.55);
+
+    DynamicWeatherSystem._cWorkHemiGnd.copy(DynamicWeatherSystem._cHemiNightGnd).lerp(
+      DynamicWeatherSystem._cHemiDayGnd,
+      dayFactor
+    );
+
+    // Directional Sun / Moon light orbit & gradual intensity
+    const baseSunIntensity = THREE.MathUtils.lerp(0.32, 2.65, dayFactor) + twilightFactor * 0.45;
+    this.currentSunIntensity = baseSunIntensity * this.currentWeatherSunFactor;
+
+    if (this.sunLight) {
+      // Keep moon elevated slightly at night so subtle night shadows/rims remain clean
+      const lightHeight = sunY >= 0 ? Math.max(25, sunY * 190) : Math.max(40, -sunY * 140);
+      const lightHoriz = sunY >= 0 ? sunX * 190 : -sunX * 140;
+      this.sunLight.position.set(lightHoriz, lightHeight, 60);
+      this.sunLight.color.copy(DynamicWeatherSystem._cWorkSun);
+    }
+
+    if (this.hemiLight) {
+      this.hemiLight.color.copy(DynamicWeatherSystem._cWorkHemiSky);
+      this.hemiLight.groundColor.copy(DynamicWeatherSystem._cWorkHemiGnd);
+      this.hemiLight.intensity = THREE.MathUtils.lerp(0.45, 1.75, dayFactor) *
+        (this.currentWeather === 'storm' ? 0.65 : this.currentWeather === 'rain' ? 0.82 : 1.0);
+    }
+
+    // Apply gradual sky background & fog updates
+    if (this.scene.background instanceof THREE.Color) {
+      this.scene.background.copy(DynamicWeatherSystem._cWorkSky);
+    } else {
+      this.scene.background = DynamicWeatherSystem._cWorkSky.clone();
+    }
+
+    if (this.scene.fog instanceof THREE.FogExp2) {
+      this.scene.fog.color.copy(DynamicWeatherSystem._cWorkSky);
+      const nightFogBoost = (1 - dayFactor) * 0.0014;
+      this.scene.fog.density = this.currentFogDensity + nightFogBoost;
+    }
+
+    // Street Lights activation at dusk/night or heavy storm
+    const duskGlow = THREE.MathUtils.smoothstep(-sunY, -0.15, 0.16);
+    const targetStreetLightLevel =
+      this.currentWeather === 'storm' ? Math.max(0.85, duskGlow) : duskGlow;
+    this.currentStreetLightLevel = THREE.MathUtils.damp(
+      this.currentStreetLightLevel,
+      targetStreetLightLevel,
+      3.5,
+      dt
+    );
+
+    const lightScale = this.currentStreetLightLevel * 1.85;
+    if (this.culling) {
+      this.culling.setStreetLightScale(lightScale);
+    } else {
+      for (let i = 0; i < this.streetLights.length; i++) {
+        this.streetLights[i].intensity = lightScale;
+      }
+    }
+    this.destructibleProps?.setStreetLightScale(lightScale);
+
+    // Shift street light bulb emissive/basic color between off (day) and glowing warm white (night)
+    DynamicWeatherSystem._cBulbWork.copy(DynamicWeatherSystem._cBulbOff).lerp(
+      DynamicWeatherSystem._cBulbOn,
+      this.currentStreetLightLevel
+    );
+    for (let i = 0; i < this.lampBulbMaterials.length; i++) {
+      this.lampBulbMaterials[i].color.copy(DynamicWeatherSystem._cBulbWork);
+    }
+
+    // Adjust NPC spawn density dynamically based on time of day & weather
+    if (this.npcsSystem) {
+      let targetDensity = THREE.MathUtils.lerp(0.36, 1.0, dayFactor);
+      if (this.currentWeather === 'storm') {
+        targetDensity *= 0.62;
+      } else if (this.currentWeather === 'rain') {
+        targetDensity *= 0.78;
+      }
+      this.npcsSystem.densityMultiplier = THREE.MathUtils.damp(
+        this.npcsSystem.densityMultiplier,
+        THREE.MathUtils.clamp(targetDensity, 0.22, 1.0),
+        1.8,
+        dt
+      );
+    }
+
+    // 4. Lightning Flash generator in Storm
     if (this.currentWeather === 'storm' || this.targetWeather === 'storm') {
       this.lightningTimer -= dt;
       if (this.lightningTimer <= 0) {
@@ -288,10 +537,7 @@ export class DynamicWeatherSystem {
       this.isLightningActive = false;
     }
 
-    // 4. Update Fog & Sun Light
-    if (this.scene.fog instanceof THREE.FogExp2) {
-      this.scene.fog.density = this.currentFogDensity;
-    }
+    // 5. Final Sun Light intensity (with lightning flash override)
     if (this.sunLight) {
       if (this.isLightningActive) {
         this.sunLight.intensity = 8.5; // Blinding lightning flash
@@ -300,7 +546,7 @@ export class DynamicWeatherSystem {
       }
     }
 
-    // 5. Rain Particle Simulation
+    // 6. Rain Particle Simulation
     const isRaining = this.currentWeather === 'rain' || this.currentWeather === 'storm' ||
       (this.targetWeather === 'rain' || this.targetWeather === 'storm');
 
@@ -337,5 +583,7 @@ export class DynamicWeatherSystem {
       this.rainMesh = null;
     }
     this.roadMaterials = [];
+    this.streetLights = [];
+    this.lampBulbMaterials = [];
   }
 }

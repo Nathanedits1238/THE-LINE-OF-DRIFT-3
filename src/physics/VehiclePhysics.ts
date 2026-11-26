@@ -24,9 +24,26 @@ export class VehiclePhysics {
   public isDrifting: boolean = false;
   public driftScore: number = 0;
   public nitroReserve: number = 100; // 0 to 100%
-  public health: number = 100; // 0 to 100%
+  public health: number = 100; // 0 to maxHealth
+  public maxHealth: number = 100;
+  public damageTakenMultiplier: number = 1.0;
+  public nitroRegenMultiplier: number = 1.0;
+  public driftScoreMultiplier: number = 1.0;
   // Wheel integrity [Front-X, Front+X, Rear-X, Rear+X]
   public missingWheels: [boolean, boolean, boolean, boolean] = [false, false, false, false];
+
+  // Career character stat multipliers
+  private careerMods = {
+    speedMult: 1.0,
+    accelMult: 1.0,
+    gripMult: 1.0,
+    turnMult: 1.0,
+    brakeMult: 1.0,
+    nitroRegenMult: 1.0,
+    healthMult: 1.0,
+    damageTakenMult: 1.0,
+    driftScoreMult: 1.0,
+  };
 
   // Config parameters
   private maxSpeedMs: number = 65; // ~234 km/h
@@ -43,15 +60,36 @@ export class VehiclePhysics {
     this.applyUpgrades();
   }
 
+  public setCareerStatModifiers(mods?: Partial<VehiclePhysics['careerMods']>) {
+    this.careerMods = {
+      speedMult: mods?.speedMult ?? 1.0,
+      accelMult: mods?.accelMult ?? 1.0,
+      gripMult: mods?.gripMult ?? 1.0,
+      turnMult: mods?.turnMult ?? 1.0,
+      brakeMult: mods?.brakeMult ?? 1.0,
+      nitroRegenMult: mods?.nitroRegenMult ?? 1.0,
+      healthMult: mods?.healthMult ?? 1.0,
+      damageTakenMult: mods?.damageTakenMult ?? 1.0,
+      driftScoreMult: mods?.driftScoreMult ?? 1.0,
+    };
+    this.applyUpgrades();
+  }
+
   public applyUpgrades() {
     const engineBoost = 1 + (this.config.levelEngine - 1) * 0.12;
     const handlingBoost = 1 + (this.config.levelHandling - 1) * 0.1;
     const armorBoost = 1 + (this.config.levelArmor - 1) * 0.2;
 
-    this.maxSpeedMs = (this.config.topSpeed / 3.6) * engineBoost;
-    this.accelForce = this.config.acceleration * 0.28 * engineBoost;
-    this.gripLateral = 12.0 * this.config.handling * 0.18 * handlingBoost;
-    this.health = 100 * armorBoost;
+    this.maxSpeedMs = (this.config.topSpeed / 3.6) * engineBoost * this.careerMods.speedMult;
+    this.accelForce = this.config.acceleration * 0.28 * engineBoost * this.careerMods.accelMult;
+    this.gripLateral = 12.0 * this.config.handling * 0.18 * handlingBoost * this.careerMods.gripMult;
+    this.brakeForce = 28.0 * this.careerMods.brakeMult;
+    this.turnSpeed = 2.4 * this.careerMods.turnMult;
+    this.nitroRegenMultiplier = this.careerMods.nitroRegenMult;
+    this.damageTakenMultiplier = this.careerMods.damageTakenMult;
+    this.driftScoreMultiplier = this.careerMods.driftScoreMult;
+    this.maxHealth = Math.round(100 * armorBoost * this.careerMods.healthMult);
+    this.health = this.maxHealth;
   }
 
   public reset(pos: THREE.Vector3, heading: number = 0) {
@@ -66,7 +104,7 @@ export class VehiclePhysics {
     this.isDrifting = false;
     this.isAirborne = false;
     this.targetGroundY = pos.y;
-    this.health = 100;
+    this.health = this.maxHealth;
     this.missingWheels = [false, false, false, false];
   }
 
@@ -171,7 +209,7 @@ export class VehiclePhysics {
       this.nitroReserve = Math.max(0, this.nitroReserve - dt * 28);
       currentAccel *= 1.7;
     } else {
-      this.nitroReserve = Math.min(100, this.nitroReserve + dt * 6);
+      this.nitroReserve = Math.min(100, this.nitroReserve + dt * 6 * this.nitroRegenMultiplier);
     }
 
     // Drive Forces
@@ -326,7 +364,9 @@ export class VehiclePhysics {
     // Drift scoring
     let driftPointsAwarded = 0;
     if (this.isDrifting && this.speedKmh > 30) {
-      const addedPoints = Math.round(this.driftSlip * this.speedKmh * dt * 8);
+      const addedPoints = Math.round(
+        this.driftSlip * this.speedKmh * dt * 8 * this.driftScoreMultiplier
+      );
       this.driftScore += addedPoints;
       driftPointsAwarded = addedPoints;
     }
@@ -340,7 +380,9 @@ export class VehiclePhysics {
   public applyCollisionImpulse(normal: THREE.Vector3, impactSpeed: number) {
     // Rebound impulse
     this.velocity.addScaledVector(normal, impactSpeed * 0.85);
-    const damage = Math.round(Math.min(35, Math.max(4, impactSpeed * 1.4)));
+    const damage = Math.round(
+      Math.min(35, Math.max(4, impactSpeed * 1.4)) * this.damageTakenMultiplier
+    );
     this.health = Math.max(0, this.health - damage);
     return damage;
   }

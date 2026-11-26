@@ -89,11 +89,11 @@ export class AccessibleLocationManager {
         id: 'residential_house',
         name: 'Casa de Luca & Miguel',
         category: 'house',
-        entrancePos: new THREE.Vector3(-176, 0, 110),
+        entrancePos: new THREE.Vector3(-196, 0, 110),
         entranceHeading: Math.PI,
-        interiorCenterPos: new THREE.Vector3(-188, 0, 110),
-        bounds: { minX: -202, maxX: -174, minZ: 98, maxZ: 122, minY: 0, maxY: 7 },
-        interactStationPos: new THREE.Vector3(-190, 0, 112),
+        interiorCenterPos: new THREE.Vector3(-214, 0, 110),
+        bounds: { minX: -232, maxX: -196, minZ: 98, maxZ: 122, minY: 0, maxY: 7 },
+        interactStationPos: new THREE.Vector3(-218, 0, 112),
         interactPrompt: '[E] / Toque para DESCANSAR & OUVIR RÁDIO (+50 REP)',
         actionToast: '🛋️ Casa: Descanso merecido! Saúde restaurada e +50 REP!',
         icon: '🏠',
@@ -214,6 +214,29 @@ export class AccessibleLocationManager {
           return { bonusCash: 1500, nitroRefilled: true, healthRestored: true };
         },
       },
+      // 8. Mansão de Mafioso: La Casa de Hermanos (Luca & Miguel)
+      {
+        id: 'la_casa_de_hermanos',
+        name: 'La Casa de Hermanos · Mansão de Luca & Miguel',
+        category: 'house',
+        entrancePos: new THREE.Vector3(96, 0, 56),
+        entranceHeading: Math.PI / 2,
+        interiorCenterPos: new THREE.Vector3(116, 0, 56),
+        bounds: { minX: 98, maxX: 152, minZ: 34, maxZ: 78, minY: 0, maxY: 12 },
+        interactStationPos: new THREE.Vector3(132, 0, 56),
+        interactPrompt: '[E] / Toque para ACESSAR COFRE DA MÁFIA & RECARREGAR (+R$ 3.500 & +120 REP)',
+        actionToast: '🎩 La Casa de Hermanos: Saúde 100%, Nitro cheio e +R$ 3.500 (+120 REP) do cofre!',
+        icon: '🎩',
+        bannerColor: 0xffd60a,
+        onInteractEffect: (s) => {
+          sound.playSuccessFanfare();
+          s.health = 100;
+          s.nitroReserve = 100;
+          s.cash += 3500;
+          s.rep += 120;
+          return { healthRestored: true, nitroRefilled: true, bonusCash: 3500, bonusRep: 120 };
+        },
+      },
     ];
 
     // Build 3D physical structures & interiors
@@ -224,6 +247,7 @@ export class AccessibleLocationManager {
     this.buildDealership3D();
     this.buildClub3D();
     this.buildConvenienceMart3D();
+    this.buildMafiosoMansion3D();
   }
 
   // --- 1. Oficina Tuning 3D Model ---
@@ -368,7 +392,7 @@ export class AccessibleLocationManager {
   private buildHouse3D() {
     const loc = this.locations[1];
     const bGroup = new THREE.Group();
-    bGroup.position.set(-188, 0, 110);
+    bGroup.position.set(-214, 0, 110);
 
     // Hardwood Living Room Floor
     const floorGeo = new THREE.BoxGeometry(26, 0.35, 22);
@@ -984,6 +1008,210 @@ export class AccessibleLocationManager {
     bGroup.add(sign);
 
     this.group.add(bGroup);
+    this.createEntranceMarker(loc);
+  }
+
+  // --- 8. La Casa de Hermanos · Mansão de Mafioso (Luca & Miguel) ---
+  private buildMafiosoMansion3D() {
+    const loc = this.locations[7];
+    const mGroup = new THREE.Group();
+    mGroup.position.set(125, 0, 56);
+
+    // Grand Estate Courtyard Pavement (extends West to X=72 in world space -> local -53..-27)
+    const courtyardMat = new THREE.MeshStandardMaterial({
+      color: 0x3b3632,
+      roughness: 0.78,
+      metalness: 0.08,
+    });
+    const courtyard = new THREE.Mesh(new THREE.BoxGeometry(28, 0.14, 44), courtyardMat);
+    courtyard.position.set(-40, 0.07, 0);
+    courtyard.receiveShadow = true;
+    mGroup.add(courtyard);
+
+    // Red Velvet Carpet Driveway Strip leading straight to Main Portico
+    const carpetMat = new THREE.MeshStandardMaterial({ color: 0x8b001e, roughness: 0.7 });
+    const drivewayCarpet = new THREE.Mesh(new THREE.BoxGeometry(26, 0.16, 4.6), carpetMat);
+    drivewayCarpet.position.set(-39, 0.085, 0);
+    mGroup.add(drivewayCarpet);
+
+    // Estate Front Gate Pillars & Wrought-Iron Perimeter Walls (x_world = 72 -> local -53)
+    const stoneMat = new THREE.MeshStandardMaterial({ color: 0xd8cbb8, roughness: 0.65 });
+    const ironMat = new THREE.MeshStandardMaterial({ color: 0x16181d, metalness: 0.8, roughness: 0.3 });
+    const goldMat = new THREE.MeshStandardMaterial({ color: 0xffd60a, metalness: 0.9, roughness: 0.2 });
+
+    const pillarL = new THREE.Mesh(new THREE.BoxGeometry(1.8, 5.2, 1.8), stoneMat);
+    pillarL.position.set(-53, 2.6, -7.2);
+    const pillarR = new THREE.Mesh(new THREE.BoxGeometry(1.8, 5.2, 1.8), stoneMat);
+    pillarR.position.set(-53, 2.6, 7.2);
+    const pillarCapL = new THREE.Mesh(new THREE.SphereGeometry(0.65, 12, 10), goldMat);
+    pillarCapL.position.set(-53, 5.65, -7.2);
+    const pillarCapR = new THREE.Mesh(new THREE.SphereGeometry(0.65, 12, 10), goldMat);
+    pillarCapR.position.set(-53, 5.65, 7.2);
+
+    const fenceWallN = new THREE.Mesh(new THREE.BoxGeometry(1.0, 2.6, 15.0), stoneMat);
+    fenceWallN.position.set(-53, 1.3, -15.5);
+    const fenceWallS = new THREE.Mesh(new THREE.BoxGeometry(1.0, 2.6, 15.0), stoneMat);
+    fenceWallS.position.set(-53, 1.3, 15.5);
+
+    const ironArch = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.65, 15.0), ironMat);
+    ironArch.position.set(-53, 5.1, 0);
+    mGroup.add(pillarL, pillarR, pillarCapL, pillarCapR, fenceWallN, fenceWallS, ironArch);
+
+    // Twin Flanking Courtyard Marble Fountains + Cypress Planters (at local x=-39, z=±13.5 so driveway stays open!)
+    const waterMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, roughness: 0.1, metalness: 0.5 });
+    [-13.5, 13.5].forEach((fz) => {
+      const basin = new THREE.Mesh(new THREE.CylinderGeometry(3.2, 3.6, 0.9, 16), stoneMat);
+      basin.position.set(-39, 0.45, fz);
+      const water = new THREE.Mesh(new THREE.CylinderGeometry(2.8, 2.8, 0.25, 16), waterMat);
+      water.position.set(-39, 0.85, fz);
+      const spire = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.8, 2.2, 12), stoneMat);
+      spire.position.set(-39, 1.6, fz);
+      const finial = new THREE.Mesh(new THREE.SphereGeometry(0.55, 12, 10), goldMat);
+      finial.position.set(-39, 2.8, fz);
+      mGroup.add(basin, water, spire, finial);
+    });
+
+    // Mansion Foundation & Cream Marble Interior Floor (52m x 42m)
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0xede4d5, roughness: 0.22, metalness: 0.1 });
+    const floor = new THREE.Mesh(new THREE.BoxGeometry(52, 0.45, 42), floorMat);
+    floor.position.set(0, 0.225, 0);
+    floor.receiveShadow = true;
+    mGroup.add(floor);
+
+    // Grand Marble Portico Steps & 4 Tuscan Columns (West facade at local x=-26.5)
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0xf4ead8, roughness: 0.65 });
+    const trimMat = new THREE.MeshStandardMaterial({ color: 0x2b1d14, roughness: 0.5 });
+    const roofTileMat = new THREE.MeshStandardMaterial({ color: 0x7c2d12, roughness: 0.65 });
+
+    const colGeo = new THREE.CylinderGeometry(0.55, 0.68, 7.6, 14);
+    [-9.5, -4.2, 4.2, 9.5].forEach((cz) => {
+      const col = new THREE.Mesh(colGeo, stoneMat);
+      col.position.set(-27.2, 4.0, cz);
+      col.castShadow = true;
+      mGroup.add(col);
+    });
+
+    // Portico Canopy Roof & Pediment
+    const porticoRoof = new THREE.Mesh(new THREE.BoxGeometry(5.5, 0.9, 22), trimMat);
+    porticoRoof.position.set(-26.2, 8.2, 0);
+    mGroup.add(porticoRoof);
+
+    // Canvas Signboard: "LA CASA DE HERMANOS" facing spawn (-X)
+    const signCanvas = document.createElement('canvas');
+    signCanvas.width = 1024;
+    signCanvas.height = 192;
+    const ctx = signCanvas.getContext('2d');
+    if (ctx) {
+      ctx.fillStyle = '#120d0a';
+      ctx.fillRect(0, 0, signCanvas.width, signCanvas.height);
+      ctx.strokeStyle = '#ffd60a';
+      ctx.lineWidth = 10;
+      ctx.strokeRect(8, 8, signCanvas.width - 16, signCanvas.height - 16);
+      ctx.fillStyle = '#ffd60a';
+      ctx.font = 'bold 58px Georgia, serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('LA CASA DE HERMANOS', signCanvas.width / 2, 82);
+      ctx.fillStyle = '#f8fafc';
+      ctx.font = 'bold 28px Arial, sans-serif';
+      ctx.fillText('MANSÃO DE LUCA & MIGUEL · COSA NOSTRA', signCanvas.width / 2, 144);
+    }
+    const signTex = new THREE.CanvasTexture(signCanvas);
+    signTex.colorSpace = THREE.SRGBColorSpace;
+    const signMat = new THREE.MeshBasicMaterial({ map: signTex });
+    this.sharedMaterials.push(signMat);
+
+    const signPlaque = new THREE.Mesh(new THREE.BoxGeometry(0.35, 2.2, 12.0), signMat);
+    signPlaque.position.set(-28.8, 9.5, 0);
+    mGroup.add(signPlaque);
+
+    // Main Mansion Walls (2-story Tuscan Villa)
+    const wallN = new THREE.Mesh(new THREE.BoxGeometry(52, 9.2, 0.9), wallMat);
+    wallN.position.set(0, 4.6, -20.5);
+    const wallS = new THREE.Mesh(new THREE.BoxGeometry(52, 9.2, 0.9), wallMat);
+    wallS.position.set(0, 4.6, 20.5);
+    const wallE = new THREE.Mesh(new THREE.BoxGeometry(0.9, 9.2, 42), wallMat);
+    wallE.position.set(25.5, 4.6, 0);
+
+    // West Facade with wide grand double doorway opening (8m wide)
+    const wallW1 = new THREE.Mesh(new THREE.BoxGeometry(0.9, 9.2, 16.5), wallMat);
+    wallW1.position.set(-25.5, 4.6, -12.25);
+    const wallW2 = new THREE.Mesh(new THREE.BoxGeometry(0.9, 9.2, 16.5), wallMat);
+    wallW2.position.set(-25.5, 4.6, 12.25);
+    const wallWTop = new THREE.Mesh(new THREE.BoxGeometry(0.9, 4.0, 9.0), wallMat);
+    wallWTop.position.set(-25.5, 7.2, 0);
+
+    // Warm glowing upper-floor estate windows on West facade
+    const windowGlowMat = new THREE.MeshBasicMaterial({ color: 0xffd584 });
+    [-14, -9, 9, 14].forEach((wz) => {
+      const winMesh = new THREE.Mesh(new THREE.BoxGeometry(0.15, 2.4, 2.6), windowGlowMat);
+      winMesh.position.set(-26.0, 6.2, wz);
+      mGroup.add(winMesh);
+    });
+
+    // Terracotta Villa Roof & Upper Penthouse Cap
+    const mainRoof = new THREE.Mesh(new THREE.BoxGeometry(54, 1.0, 44), roofTileMat);
+    mainRoof.position.set(0, 9.6, 0);
+    const upperVilla = new THREE.Mesh(new THREE.BoxGeometry(28, 3.4, 24), wallMat);
+    upperVilla.position.set(4, 11.4, 0);
+    const upperRoof = new THREE.Mesh(new THREE.BoxGeometry(30, 0.9, 26), roofTileMat);
+    upperRoof.position.set(4, 13.4, 0);
+
+    mGroup.add(wallN, wallS, wallE, wallW1, wallW2, wallWTop, mainRoof, upperVilla, upperRoof);
+
+    // Interior: Red Carpet Runner, Mahogany Don's Desk, Gold Bullion Vault & Velvet Lounges
+    const interiorCarpet = new THREE.Mesh(new THREE.BoxGeometry(38, 0.48, 5.0), carpetMat);
+    interiorCarpet.position.set(-5, 0.24, 0);
+    mGroup.add(interiorCarpet);
+
+    const mahoganyMat = new THREE.MeshStandardMaterial({ color: 0x451a03, roughness: 0.35, metalness: 0.15 });
+    const donDesk = new THREE.Mesh(new THREE.BoxGeometry(3.2, 1.25, 6.8), mahoganyMat);
+    donDesk.position.set(7.5, 0.625, 0);
+
+    const bankerLamp = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.28, 0.35, 0.55, 10),
+      new THREE.MeshBasicMaterial({ color: 0x22c55e })
+    );
+    bankerLamp.position.set(7.2, 1.5, -2.0);
+
+    // Mafia Vault Gold Bullion Stack behind Don's Desk
+    const vaultSafe = new THREE.Mesh(
+      new THREE.BoxGeometry(2.4, 4.2, 5.2),
+      new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.85, roughness: 0.25 })
+    );
+    vaultSafe.position.set(18.5, 2.1, 0);
+    const goldStack = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.1, 2.2), goldMat);
+    goldStack.position.set(16.2, 0.9, 0);
+
+    // Crimson Velvet Sofas & Poker Table in Lounge
+    const sofa1 = new THREE.Mesh(new THREE.BoxGeometry(6.0, 1.15, 2.4), carpetMat);
+    sofa1.position.set(-4, 0.575, -10.5);
+    const sofa2 = new THREE.Mesh(new THREE.BoxGeometry(6.0, 1.15, 2.4), carpetMat);
+    sofa2.position.set(-4, 0.575, 10.5);
+
+    // Chandelier & Warm Mafioso Lighting
+    const chandelierRing = new THREE.Mesh(new THREE.TorusGeometry(2.4, 0.18, 8, 20), goldMat);
+    chandelierRing.rotateX(Math.PI / 2);
+    chandelierRing.position.set(0, 7.6, 0);
+
+    const interiorLight = new THREE.PointLight(0xffd68a, 2.8, 36);
+    interiorLight.position.set(0, 7.0, 0);
+    const porticoLight = new THREE.PointLight(0xffc966, 2.2, 26);
+    porticoLight.position.set(-29, 6.5, 0);
+
+    mGroup.add(
+      donDesk,
+      bankerLamp,
+      vaultSafe,
+      goldStack,
+      sofa1,
+      sofa2,
+      chandelierRing,
+      interiorLight,
+      porticoLight
+    );
+
+    this.group.add(mGroup);
     this.createEntranceMarker(loc);
   }
 

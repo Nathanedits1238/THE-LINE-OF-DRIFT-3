@@ -1,5 +1,9 @@
 import * as THREE from 'three';
-import { OpenWorldTransportMode, PlayerControls } from '../types';
+import {
+  CareerCharacterAppearance,
+  OpenWorldTransportMode,
+  PlayerControls,
+} from '../types';
 
 export interface TransportSpec {
   id: OpenWorldTransportMode;
@@ -261,6 +265,18 @@ export class OpenWorldTraversalRig {
   private sharedGeometries: THREE.BufferGeometry[] = [];
   private animTime: number = 0;
 
+  // Player character visual customization & career stat multipliers
+  private customJacketMats: THREE.MeshStandardMaterial[] = [];
+  private customPantsMats: THREE.MeshStandardMaterial[] = [];
+  private customSkinMats: THREE.MeshStandardMaterial[] = [];
+  private customTorsoGroups: THREE.Group[] = [];
+  private careerStatMods = {
+    speedMult: 1.0,
+    accelMult: 1.0,
+    agilityMult: 1.0,
+    drivingMult: 1.0,
+  };
+
   constructor(scene: THREE.Scene) {
     this.scene = scene;
     this.rootGroup.visible = false;
@@ -298,9 +314,9 @@ export class OpenWorldTraversalRig {
   }
 
   private buildAllRigs() {
-    this.rigs.moto_street = this.buildMotorcycleRig('moto_street');
-    this.rigs.moto_super = this.buildMotorcycleRig('moto_super');
-    this.rigs.moto_cross = this.buildMotorcycleRig('moto_cross');
+    this.rigs.moto_street = this.buildMotorcycleRig('moto_street', true);
+    this.rigs.moto_super = this.buildMotorcycleRig('moto_super', true);
+    this.rigs.moto_cross = this.buildMotorcycleRig('moto_cross', true);
     this.rigs.bicycle = this.buildBicycleRig();
     this.rigs.skateboard = this.buildSkateboardRig();
     this.rigs.foot = this.buildOnFootRig();
@@ -311,6 +327,48 @@ export class OpenWorldTraversalRig {
         this.rootGroup.add(rig.group);
       }
     });
+  }
+
+  public setCareerStatModifiers(mods?: {
+    speedMult?: number;
+    accelMult?: number;
+    agilityMult?: number;
+    drivingMult?: number;
+  }) {
+    this.careerStatMods = {
+      speedMult: mods?.speedMult ?? 1.0,
+      accelMult: mods?.accelMult ?? 1.0,
+      agilityMult: mods?.agilityMult ?? 1.0,
+      drivingMult: mods?.drivingMult ?? 1.0,
+    };
+  }
+
+  public applyCharacterAppearance(appearance?: CareerCharacterAppearance) {
+    if (!appearance) return;
+    for (const mat of this.customJacketMats) {
+      mat.color.set(appearance.jacketColor);
+    }
+    for (const mat of this.customPantsMats) {
+      mat.color.set(appearance.pantsColor);
+    }
+    for (const mat of this.customSkinMats) {
+      mat.color.set(appearance.skinTone);
+    }
+    const sx =
+      appearance.build === 'lean'
+        ? 0.9
+        : appearance.build === 'heavy'
+          ? 1.18
+          : 1.02;
+    const sz =
+      appearance.build === 'lean'
+        ? 0.9
+        : appearance.build === 'heavy'
+          ? 1.15
+          : 1.02;
+    for (const torso of this.customTorsoGroups) {
+      torso.scale.set(sx, 1.0, sz);
+    }
   }
 
   private createMat(params: THREE.MeshStandardMaterialParameters): THREE.MeshStandardMaterial {
@@ -363,7 +421,11 @@ export class OpenWorldTraversalRig {
     return shadow;
   }
 
-  private createRiderMesh(style: 'sport' | 'street' | 'cross' | 'casual' | 'skate', primaryColor: number): {
+  private createRiderMesh(
+    style: 'sport' | 'street' | 'cross' | 'casual' | 'skate',
+    primaryColor: number,
+    registerCustomizable: boolean = true
+  ): {
     riderTorso: THREE.Group;
     leftArm: THREE.Group;
     rightArm: THREE.Group;
@@ -384,6 +446,12 @@ export class OpenWorldTraversalRig {
     const skinMat = this.createMat({ color: 0xd9a06c, roughness: 0.68, metalness: 0.02 });
 
     const riderTorso = new THREE.Group();
+    if (registerCustomizable) {
+      this.customJacketMats.push(jacketMat);
+      this.customPantsMats.push(pantsMat);
+      this.customSkinMats.push(skinMat);
+      this.customTorsoGroups.push(riderTorso);
+    }
     const torsoMesh = new THREE.Mesh(this.trackGeo(new THREE.BoxGeometry(0.42, 0.52, 0.24)), jacketMat);
     torsoMesh.position.y = 0.26;
     torsoMesh.castShadow = true;
@@ -458,7 +526,10 @@ export class OpenWorldTraversalRig {
     return { riderTorso, leftArm, rightArm, leftLeg, rightLeg, head };
   }
 
-  private buildMotorcycleRig(type: 'moto_street' | 'moto_super' | 'moto_cross'): RigVisualParts {
+  private buildMotorcycleRig(
+    type: 'moto_street' | 'moto_super' | 'moto_cross',
+    registerCustomizable: boolean = false
+  ): RigVisualParts {
     const group = new THREE.Group();
     const chassisPivot = new THREE.Group();
     group.add(this.createContactShadow(0.65, 1.35));
@@ -590,7 +661,8 @@ export class OpenWorldTraversalRig {
     // 5. Mounted Rider (tucked forward for Superbike, upright for Street/Cross)
     const rider = this.createRiderMesh(
       isSuper ? 'sport' : isCross ? 'cross' : 'street',
-      isSuper ? 0xdc2626 : isCross ? 0xea580c : 0x0284c7
+      isSuper ? 0xdc2626 : isCross ? 0xea580c : 0x0284c7,
+      registerCustomizable
     );
     rider.riderTorso.position.set(0, wheelR + 0.46, -0.15);
     rider.riderTorso.rotation.x = isSuper ? 0.56 : isCross ? 0.22 : 0.34;
@@ -856,6 +928,26 @@ export class OpenWorldTraversalRig {
     });
   }
 
+  public parkMotorcycle(pos: THREE.Vector3, heading: number, mode: OpenWorldTransportMode) {
+    const meshRig = this.buildMotorcycleRig(
+      mode === 'moto_super' ? 'moto_super' : mode === 'moto_cross' ? 'moto_cross' : 'moto_street'
+    );
+    if (meshRig.riderTorso) meshRig.riderTorso.visible = false;
+    if (meshRig.leftLeg) meshRig.leftLeg.visible = false;
+    if (meshRig.rightLeg) meshRig.rightLeg.visible = false;
+    meshRig.chassisPivot.rotation.z = 0.14; // resting on kickstand
+    meshRig.group.position.copy(pos);
+    meshRig.group.rotation.y = heading;
+    this.parkedMotosGroup.add(meshRig.group);
+    this.parkedStreetMotos.push({
+      id: `street_moto_${Date.now()}`,
+      mode,
+      position: pos.clone(),
+      heading,
+      group: meshRig.group,
+    });
+  }
+
   public clearStreetMotorcycles() {
     while (this.parkedMotosGroup.children.length > 0) {
       this.parkedMotosGroup.remove(this.parkedMotosGroup.children[0]);
@@ -951,10 +1043,11 @@ export class OpenWorldTraversalRig {
     const targetSteer = controls.steer * 0.65;
     physics.steerAngle = THREE.MathUtils.damp(physics.steerAngle, targetSteer, 16, dt);
 
-    // Sprint / Nitro handling
+    // Sprint / Nitro handling + Career Attribute Multipliers
     const boostPressed = controls.nitro && (!spec.isMotorized || physics.nitroReserve > 2);
-    let currentAccel = spec.accelForce;
-    let effectiveMaxSpeed = spec.maxSpeedMs;
+    const speedBonus = spec.isMotorized ? this.careerStatMods.speedMult : 1 + (this.careerStatMods.speedMult - 1) * 1.45;
+    let currentAccel = spec.accelForce * this.careerStatMods.accelMult;
+    let effectiveMaxSpeed = spec.maxSpeedMs * speedBonus;
     if (boostPressed && controls.throttle > 0) {
       if (spec.isMotorized) {
         physics.nitroReserve = Math.max(0, physics.nitroReserve - dt * 24);
@@ -965,25 +1058,26 @@ export class OpenWorldTraversalRig {
         effectiveMaxSpeed *= 1.25;
       }
     } else if (spec.isMotorized) {
-      physics.nitroReserve = Math.min(100, physics.nitroReserve + dt * 8);
+      physics.nitroReserve = Math.min(100, physics.nitroReserve + dt * 8 * this.careerStatMods.agilityMult);
     }
 
     // Longitudinal drive
+    const effectiveBrakeForce = spec.brakeForce * this.careerStatMods.drivingMult;
     let longitudinalForce = 0;
     if (controls.throttle > 0) {
       if (forwardSpeed >= 0) {
         const ratio = Math.max(0, 1 - forwardSpeed / effectiveMaxSpeed);
         longitudinalForce += controls.throttle * currentAccel * (0.4 + 0.6 * ratio);
       } else {
-        longitudinalForce += controls.throttle * spec.brakeForce;
+        longitudinalForce += controls.throttle * effectiveBrakeForce;
       }
     }
     if (controls.brake > 0) {
       if (forwardSpeed > 0.6) {
-        longitudinalForce -= controls.brake * spec.brakeForce;
+        longitudinalForce -= controls.brake * effectiveBrakeForce;
       } else {
         const revRatio = Math.max(0, 1 - Math.abs(forwardSpeed) / spec.reverseMaxMs);
-        longitudinalForce -= controls.brake * (spec.accelForce * 0.65) * revRatio;
+        longitudinalForce -= controls.brake * (currentAccel * 0.65) * revRatio;
       }
     }
 
@@ -994,13 +1088,13 @@ export class OpenWorldTraversalRig {
 
     // Lateral grip (motorcycles can kick tail out slightly on handbrake)
     const handbrakeDrift = spec.isMotorcycle && controls.handbrake && horizSpeed > 9;
-    const latGrip = handbrakeDrift ? spec.gripLateral * 0.38 : spec.gripLateral;
+    const latGrip = (handbrakeDrift ? spec.gripLateral * 0.38 : spec.gripLateral) * this.careerStatMods.drivingMult;
     const lateralForce = -lateralSpeed * latGrip;
 
     const turnFactor = spec.id === 'foot' ? 1.0 : Math.min(1.0, Math.max(0.25, Math.abs(forwardSpeed) / 3.2));
     const highSpeedStability = spec.isMotorized ? 1.0 / (1.0 + Math.max(0, horizSpeed - 28) * 0.022) : 1.0;
     const dirSign = forwardSpeed < -0.6 ? -1 : 1;
-    let yawTorque = -physics.steerAngle * spec.turnSpeed * turnFactor * highSpeedStability * dirSign;
+    let yawTorque = -physics.steerAngle * spec.turnSpeed * this.careerStatMods.agilityMult * turnFactor * highSpeedStability * dirSign;
     if (handbrakeDrift) yawTorque *= 1.55;
 
     if (Math.abs(controls.steer) < 0.01) {
@@ -1028,7 +1122,8 @@ export class OpenWorldTraversalRig {
     if (jumpPressed && !this.jumpLatch && !physics.isAirborne && this.trickCooldown <= 0) {
       this.jumpLatch = true;
       physics.isAirborne = true;
-      physics.velocity.y = spec.jumpImpulse;
+      const agilityJumpMult = 1 + (this.careerStatMods.agilityMult - 1) * 0.65;
+      physics.velocity.y = spec.jumpImpulse * agilityJumpMult;
       this.trickCooldown = 0.55;
       jumpTriggered = true;
       if (this.activeMode === 'skateboard') {
@@ -1069,7 +1164,7 @@ export class OpenWorldTraversalRig {
     this.wheelieAngle = THREE.MathUtils.damp(this.wheelieAngle, targetWheelie, 8, dt);
 
     if (wantsWheelie) {
-      wheelieAwarded = Math.round(horizSpeed * dt * 16);
+      wheelieAwarded = Math.round(horizSpeed * dt * 16 * this.careerStatMods.drivingMult);
       physics.driftScore += wheelieAwarded;
     }
 

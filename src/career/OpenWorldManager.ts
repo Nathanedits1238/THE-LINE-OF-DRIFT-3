@@ -449,33 +449,53 @@ export class OpenWorldManager {
 
   public getDistrictName(pos: THREE.Vector3): string {
     if (this.trackId === 'track_coast') {
-      if (pos.x > 100) return 'Orla do Farol';
-      if (pos.x < -100) return 'Falésias do Pacífico';
-      return 'Rodovia Costeira Central';
+      if (pos.x > 100) return 'Praia · The Jounnte';
+      if (pos.x < -100) return 'The Lained · Orla Sul';
+      return 'Rodovia da Praia · The Jounnte';
     }
     if (this.trackId === 'track_docks') {
-      if (pos.z > 0) return 'Terminal de Contêineres Sul';
-      return 'Zona Portuária & Guindastes';
+      if (pos.z > 0) return 'Bairro Industrial · Porto Sul';
+      return 'The Jounnte · Zona Portuária';
     }
     if (this.trackId === 'track_desert') {
-      if (pos.y > 4) return 'Passagem Elevada do Desfiladeiro';
-      return 'Cânion da Fronteira Seca';
+      if (pos.y > 4 || Math.abs(pos.x) > 170) return 'Zona de Perigo · The Laymed';
+      if (pos.z < 0) return 'Bairros Pequenos · The Laymed';
+      return 'Vales de Areia · The Laymed';
+    }
+    if (this.trackId === 'track_suburb' || this.trackId === 'track_alpine') {
+      if (pos.x < -110) return 'Fronteira Principal (The Jounnte)';
+      if (pos.z < -120) return 'Avenida Principal · The Chamed';
+      if (pos.z > 130 && pos.x > 0) return 'Bairro Industrial · The Chamed';
+      if (pos.z > 80) return 'Bairro Residencial · The Chamed';
+      return 'Floresta de Árvores · The Chamed';
+    }
+    if (this.trackId === 'track_san_bernard') {
+      if (Math.hypot(pos.x, pos.z) < 75) return 'Praça Central · The San Bernard';
+      if (pos.z < -80) return 'Vila Norte · The San Bernard';
+      if (pos.z > 100) return 'Distrito Sul · The San Bernard';
+      return 'Cidade The San Bernard';
     }
 
-    // Metrópole Neon districts
+    // The Jounnte (Cidade) — Bairro Comercial, Residencial, Industrial, Praia & The Lained
     if (Math.abs(pos.x) < 28 && Math.abs(pos.z) < 245 && pos.y > 3.5) {
-      return 'Viaduto Central Elevado';
+      return 'Viaduto Central · The Jounnte';
     }
-    if (Math.abs(pos.x) < 35 && Math.abs(pos.z) < 60) {
-      return 'Sob o Viaduto · Praça da Sé';
+    if (pos.x >= 68 && pos.x <= 158 && pos.z >= 26 && pos.z <= 86) {
+      return 'La Casa de Hermanos · The Lained';
     }
-    if (pos.z < -120) {
-      return pos.x >= 0 ? 'Setor Corporativo Norte' : 'Avenida Financeira Oeste';
+    if (pos.z < -110) {
+      return 'Bairro Comercial · The Jounnte';
     }
-    if (pos.z > 120) {
-      return pos.x >= 0 ? 'Distrito Neon Sul' : 'Terminal Sul de Drift';
+    if (pos.x > 95 && pos.z >= 100) {
+      return 'Praia · The Jounnte';
     }
-    return pos.x >= 0 ? 'Centro Metropolitano Leste' : 'Bairro Industrial Oeste';
+    if (pos.x >= 70 && pos.z >= -110 && pos.z < 100) {
+      return 'The Lained · The Jounnte';
+    }
+    if (pos.z >= 100) {
+      return 'Bairro Industrial · The Jounnte';
+    }
+    return 'Bairro Residencial · The Jounnte';
   }
 
   public registerChaos(amount: number, currentHeat: number): number | undefined {

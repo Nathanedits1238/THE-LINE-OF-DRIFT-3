@@ -56,6 +56,7 @@ export class CityGenerator {
   private sunLight: THREE.DirectionalLight | null = null;
   private hemiLight: THREE.HemisphereLight | null = null;
   private streetLights: THREE.PointLight[] = [];
+  private lampBulbMaterials: THREE.MeshBasicMaterial[] = [];
   public roadMaterial: THREE.MeshStandardMaterial | null = null;
 
   // Zero-GC Preallocated Math Helpers
@@ -82,18 +83,33 @@ export class CityGenerator {
     this.scene.add(this.propsGroup);
   }
 
+  public getSunLight(): THREE.DirectionalLight | null {
+    return this.sunLight;
+  }
+  public getHemiLight(): THREE.HemisphereLight | null {
+    return this.hemiLight;
+  }
+  public getStreetLights(): THREE.PointLight[] {
+    return this.streetLights;
+  }
+  public getLampBulbMaterials(): THREE.MeshBasicMaterial[] {
+    return this.lampBulbMaterials;
+  }
+
   public generateTrack(track: TrackConfig, quality: GraphicsQuality) {
     // Clear existing
     this.clear();
     this.activeTrackId = track.id;
 
-    if (track.id === 'track_city') {
+    if (track.id === 'track_city' || track.id === 'track_neon_tokyo') {
       this.buildNeonCity();
     } else if (track.id === 'track_coast') {
       this.buildCoastalHighway();
     } else if (track.id === 'track_docks') {
       this.buildIndustrialDocks();
-    } else if (track.id === 'track_suburb') {
+    } else if (track.id === 'track_san_bernard') {
+      this.buildSanBernardTown();
+    } else if (track.id === 'track_suburb' || track.id === 'track_alpine') {
       this.buildSuburbanHills();
     } else {
       this.buildDesertCanyon();
@@ -125,6 +141,7 @@ export class CityGenerator {
     this.colliders = [];
     this.waypoints = [];
     this.streetLights = [];
+    this.lampBulbMaterials = [];
     this.jumpRamps = [];
     this.bridges = [];
     this.tunnels = [];
@@ -275,6 +292,15 @@ export class CityGenerator {
     createStraightStreet(-260, -180, 260, -180, 20); // Rua Transversal Norte
     createStraightStreet(-260, 0, 260, 0, 20); // Rua Transversal Centro (Cruzamento da Sé)
     createStraightStreet(-260, 180, 260, 180, 20); // Rua Transversal Sul
+
+    // 2b. Acesso asfaltado da Mansão La Casa de Hermanos (Luca & Miguel) até a Rua Transversal Centro
+    const estateSpurNS = new THREE.Mesh(new THREE.BoxGeometry(12, 0.04, 56), streetMat);
+    estateSpurNS.position.set(76, 0.025, 28);
+    estateSpurNS.receiveShadow = true;
+    const estateSpurEW = new THREE.Mesh(new THREE.BoxGeometry(22, 0.04, 14), streetMat);
+    estateSpurEW.position.set(82, 0.025, 56);
+    estateSpurEW.receiveShadow = true;
+    this.trackGroup.add(estateSpurNS, estateSpurEW);
 
     // 3. Cruzamentos com Faixas de Pedestres & Semáforos Destrutíveis
     const intersectionPoints = [
@@ -586,12 +612,14 @@ export class CityGenerator {
           isSafe = false;
         }
 
-        // Accessible locations clearance (Tuning Garage, House, Diner, Observatory)
+        // Accessible locations clearance (Tuning Garage, House, Diner, Observatory, La Casa de Hermanos)
         const accessibleClearance = [
           { minX: -100, maxX: -55, minZ: 0, maxZ: 36 }, // Tuning Garage
-          { minX: -210, maxX: -165, minZ: 90, maxZ: 130 }, // House
+          { minX: -236, maxX: -194, minZ: 92, maxZ: 128 }, // House
           { minX: 85, maxX: 125, minZ: -100, maxZ: -65 }, // Diner
           { minX: 52, maxX: 92, minZ: 90, maxZ: 130 }, // Observatory
+          { minX: 68, maxX: 158, minZ: 28, maxZ: 84 }, // La Casa de Hermanos Estate & Courtyard
+          { minX: 64, maxX: 88, minZ: -6, maxZ: 60 }, // La Casa de Hermanos Driveway Spur
         ];
         for (let a = 0; a < accessibleClearance.length; a++) {
           const ac = accessibleClearance[a];
@@ -886,6 +914,8 @@ export class CityGenerator {
 
       const bulbGeo = new THREE.SphereGeometry(0.4, 8, 8);
       const bulbMat = new THREE.MeshBasicMaterial({ color: 0xfff0bb });
+      this.lampBulbMaterials.push(bulbMat);
+      this.lampBulbMaterials.push(this.destructibleProps.getLampHeadMaterial());
       const bulbsInstanced = new THREE.InstancedMesh(bulbGeo, bulbMat, lampPositions.length);
 
       for (let i = 0; i < lampPositions.length; i++) {
@@ -1002,6 +1032,7 @@ export class CityGenerator {
     rockInstanced.instanceMatrix.needsUpdate = true;
     rockInstanced.computeBoundingSphere();
     this.buildingsGroup.add(rockInstanced);
+    this.addTrackStreetLights(this.roadHalfWidth, 8);
   }
 
   // --- Track 3: Docas Industriais (Batched containers with InstancedMesh) ---
@@ -1063,6 +1094,7 @@ export class CityGenerator {
     for (let i = 0; i < 60; i++) {
       const cx = (Math.random() - 0.5) * 600;
       const cz = (Math.random() - 0.5) * 600;
+      if (cx >= 66 && cx <= 160 && cz >= 24 && cz <= 86) continue;
 
       let minDst = 999;
       for (let w = 0; w < this.waypoints.length; w++) {
@@ -1117,6 +1149,7 @@ export class CityGenerator {
       containerInstanced.computeBoundingSphere();
       this.buildingsGroup.add(containerInstanced);
     }
+    this.addTrackStreetLights(this.roadHalfWidth, 8);
   }
 
   // --- Track 4: Cânion do Deserto (Batched mesas with InstancedMesh) ---
@@ -1200,6 +1233,7 @@ export class CityGenerator {
     canyonInstanced.instanceMatrix.needsUpdate = true;
     canyonInstanced.computeBoundingSphere();
     this.buildingsGroup.add(canyonInstanced);
+    this.addTrackStreetLights(this.roadHalfWidth, 10);
   }
 
   // --- Track 5: Bairro das Colinas / Suburban Hills (Residential hills, villas, lush trees & curves) ---
@@ -1315,6 +1349,224 @@ export class CityGenerator {
 
     // Place Accessible Locations
     this.accessibleLocations.generateLocations(this.buildingsGroup, this.colliders);
+
+    // Register groups with CullingManager for advanced View Frustum & Distance Culling
+    this.culling.registerObject(this.buildingsGroup);
+    this.culling.registerObject(this.propsGroup);
+    this.culling.registerObject(this.destructibleProps.rootGroup);
+    this.addTrackStreetLights(this.roadHalfWidth, 9);
+  }
+
+  // --- Track: The San Bernard (Cidade / Vila Grande estratégica) ---
+  private buildSanBernardTown() {
+    this.roadMaterial = new THREE.MeshStandardMaterial({
+      color: 0x262b36,
+      roughness: 0.72,
+      metalness: 0.12,
+    });
+
+    const groundGeo = new THREE.PlaneGeometry(1300, 1300);
+    groundGeo.rotateX(-Math.PI / 2);
+    const groundMat = new THREE.MeshStandardMaterial({
+      color: 0x24332a,
+      roughness: 0.9,
+    });
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.receiveShadow = true;
+    this.trackGroup.add(ground);
+
+    // Grand figure-like town loop around The San Bernard central plaza & outskirts
+    const pathPoints = [
+      new THREE.Vector3(0, 0, -290),
+      new THREE.Vector3(190, 0, -250),
+      new THREE.Vector3(290, 0, -90),
+      new THREE.Vector3(250, 0, 110),
+      new THREE.Vector3(120, 0, 270),
+      new THREE.Vector3(-90, 0, 290),
+      new THREE.Vector3(-260, 0, 170),
+      new THREE.Vector3(-290, 0, -40),
+      new THREE.Vector3(-190, 0, -220),
+    ];
+    const curve = new THREE.CatmullRomCurve3(pathPoints, true);
+    const sampled = curve.getPoints(150);
+
+    for (let i = 0; i < sampled.length; i++) {
+      const p = sampled[i];
+      const nextP = sampled[(i + 1) % sampled.length];
+      const angle = Math.atan2(nextP.x - p.x, nextP.z - p.z);
+      this.waypoints.push({ position: p.clone(), heading: angle });
+    }
+
+    this.roadHalfWidth = 12;
+
+    const roadGeo = new THREE.TubeGeometry(curve, 180, 12, 8, true);
+    roadGeo.scale(1, 0.02, 1);
+    const road = new THREE.Mesh(roadGeo, this.roadMaterial);
+    road.position.y = 0.05;
+    road.receiveShadow = true;
+    this.trackGroup.add(road);
+
+    // Central Cross Avenues through The San Bernard Plaza
+    const crossNs = new THREE.Mesh(new THREE.PlaneGeometry(20, 560), this.roadMaterial);
+    crossNs.rotation.x = -Math.PI / 2;
+    crossNs.position.y = 0.04;
+    crossNs.receiveShadow = true;
+    this.trackGroup.add(crossNs);
+
+    const crossEw = new THREE.Mesh(new THREE.PlaneGeometry(560, 20), this.roadMaterial);
+    crossEw.rotation.x = -Math.PI / 2;
+    crossEw.position.y = 0.045;
+    crossEw.receiveShadow = true;
+    this.trackGroup.add(crossEw);
+
+    // Central Government / Civic Plaza Tower in The San Bernard
+    const plazaMat = new THREE.MeshStandardMaterial({ color: 0x3b4252, roughness: 0.75 });
+    const plaza = new THREE.Mesh(new THREE.CylinderGeometry(42, 44, 0.3, 24), plazaMat);
+    plaza.position.set(0, 0.12, 0);
+    this.trackGroup.add(plaza);
+
+    const civicGroup = new THREE.Group();
+    civicGroup.position.set(0, 0, 0);
+    const hallBody = new THREE.Mesh(
+      new THREE.BoxGeometry(28, 34, 28),
+      new THREE.MeshStandardMaterial({ color: 0xcbd5e1, roughness: 0.55, metalness: 0.25 })
+    );
+    hallBody.position.y = 17;
+    hallBody.castShadow = true;
+    civicGroup.add(hallBody);
+    const spire = new THREE.Mesh(
+      new THREE.ConeGeometry(16, 18, 4),
+      new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.4, metalness: 0.5 })
+    );
+    spire.rotation.y = Math.PI / 4;
+    spire.position.y = 43;
+    civicGroup.add(spire);
+    this.buildingsGroup.add(civicGroup);
+    this.colliders.push({ minX: -15, maxX: 15, minZ: -15, maxZ: 15 });
+    this.skyscraperZones.push({ x: 0, z: 0, halfW: 15, halfL: 15, height: 52 });
+
+    // Instanced Town Blocks along The San Bernard Streets
+    const blockGeo = new THREE.BoxGeometry(20, 1, 20);
+    const blockMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.72, metalness: 0.15 });
+    const positions: { x: number; z: number; h: number; color: number }[] = [];
+
+    for (let i = 0; i < sampled.length; i += 4) {
+      const p = sampled[i];
+      const nextP = sampled[(i + 1) % sampled.length];
+      const forward = new THREE.Vector3().subVectors(nextP, p).normalize();
+      const normal = new THREE.Vector3(-forward.z, 0, forward.x);
+
+      [-32, 32].forEach((offset, sIdx) => {
+        const bx = p.x + normal.x * offset;
+        const bz = p.z + normal.z * offset;
+        if (Math.abs(bx) < 28 || Math.abs(bz) < 28) return;
+        const h = 14 + ((i * 7 + sIdx * 11) % 28);
+        const palette = [0x94a3b8, 0xe2e8f0, 0x64748b, 0xfef08a, 0x475569];
+        positions.push({ x: bx, z: bz, h, color: palette[(i + sIdx) % palette.length] });
+        this.colliders.push({ minX: bx - 10.5, maxX: bx + 10.5, minZ: bz - 10.5, maxZ: bz + 10.5 });
+        this.skyscraperZones.push({ x: bx, z: bz, halfW: 10.5, halfL: 10.5, height: h });
+
+        if (i % 8 === 0) {
+          this.destructibleProps.addTree(bx - normal.x * (sIdx === 0 ? -12 : 12), bz - normal.z * (sIdx === 0 ? -12 : 12), 1.0);
+        }
+      });
+    }
+
+    if (positions.length > 0) {
+      const inst = new THREE.InstancedMesh(blockGeo, blockMat, positions.length);
+      inst.castShadow = true;
+      inst.receiveShadow = true;
+      for (let i = 0; i < positions.length; i++) {
+        const b = positions[i];
+        CityGenerator._tempPos.set(b.x, b.h * 0.5, b.z);
+        CityGenerator._tempQuat.identity();
+        CityGenerator._tempScale.set(1, b.h, 1);
+        CityGenerator._tempMatrix.compose(CityGenerator._tempPos, CityGenerator._tempQuat, CityGenerator._tempScale);
+        inst.setMatrixAt(i, CityGenerator._tempMatrix);
+        CityGenerator._tempColor.setHex(b.color);
+        inst.setColorAt(i, CityGenerator._tempColor);
+      }
+      inst.instanceMatrix.needsUpdate = true;
+      if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+      this.buildingsGroup.add(inst);
+    }
+
+    this.destructibleProps.addTrafficLight(0, -290, 0);
+    this.destructibleProps.addTrafficLight(290, -90, Math.PI / 2);
+    this.destructibleProps.addTrafficLight(-90, 290, Math.PI);
+
+    this.accessibleLocations.generateLocations(this.buildingsGroup, this.colliders);
+    this.culling.registerObject(this.buildingsGroup);
+    this.culling.registerObject(this.propsGroup);
+    this.culling.registerObject(this.destructibleProps.rootGroup);
+    this.addTrackStreetLights(this.roadHalfWidth, 8);
+  }
+
+  private addTrackStreetLights(roadHalfWidth: number, everyN: number) {
+    const lampPositions: { x: number; y: number; z: number }[] = [];
+    for (let i = 0; i < this.waypoints.length; i += everyN) {
+      const wp = this.waypoints[i];
+      const normalX = Math.cos(wp.heading);
+      const normalZ = -Math.sin(wp.heading);
+      const side = (i / everyN) % 2 === 0 ? 1 : -1;
+      const cx = wp.position.x + normalX * side * (roadHalfWidth + 2.6);
+      const cz = wp.position.z + normalZ * side * (roadHalfWidth + 2.6);
+
+      // Avoid La Casa de Hermanos courtyard/estate area
+      if (cx >= 66 && cx <= 156 && cz >= 24 && cz <= 82) continue;
+
+      let safe = true;
+      for (let j = 0; j < this.waypoints.length; j += 2) {
+        if (Math.abs(i - j) <= 2) continue;
+        const dx = cx - this.waypoints[j].position.x;
+        const dz = cz - this.waypoints[j].position.z;
+        if (dx * dx + dz * dz < (roadHalfWidth + 1.5) * (roadHalfWidth + 1.5)) {
+          safe = false;
+          break;
+        }
+      }
+      if (safe) {
+        lampPositions.push({ x: cx, y: wp.position.y || 0, z: cz });
+      }
+    }
+
+    if (lampPositions.length === 0) return;
+
+    const poleGeo = new THREE.CylinderGeometry(0.18, 0.22, 7, 8);
+    const poleMat = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.8 });
+    const polesInstanced = new THREE.InstancedMesh(poleGeo, poleMat, lampPositions.length);
+
+    const bulbGeo = new THREE.SphereGeometry(0.4, 8, 8);
+    const bulbMat = new THREE.MeshBasicMaterial({ color: 0xfff0bb });
+    this.lampBulbMaterials.push(bulbMat);
+    const destructibleBulb = this.destructibleProps.getLampHeadMaterial();
+    if (!this.lampBulbMaterials.includes(destructibleBulb)) {
+      this.lampBulbMaterials.push(destructibleBulb);
+    }
+    const bulbsInstanced = new THREE.InstancedMesh(bulbGeo, bulbMat, lampPositions.length);
+
+    for (let i = 0; i < lampPositions.length; i++) {
+      const lp = lampPositions[i];
+      CityGenerator._tempPos.set(lp.x, lp.y + 3.5, lp.z);
+      CityGenerator._tempQuat.identity();
+      CityGenerator._tempScale.set(1, 1, 1);
+      CityGenerator._tempMatrix.compose(CityGenerator._tempPos, CityGenerator._tempQuat, CityGenerator._tempScale);
+      polesInstanced.setMatrixAt(i, CityGenerator._tempMatrix);
+
+      CityGenerator._tempPos.set(lp.x, lp.y + 7.0, lp.z);
+      CityGenerator._tempMatrix.compose(CityGenerator._tempPos, CityGenerator._tempQuat, CityGenerator._tempScale);
+      bulbsInstanced.setMatrixAt(i, CityGenerator._tempMatrix);
+
+      const pLight = new THREE.PointLight(0xffeedd, 1.2, 35);
+      pLight.position.set(lp.x, lp.y + 6.8, lp.z);
+      this.propsGroup.add(pLight);
+      this.streetLights.push(pLight);
+      this.culling.registerObject(pLight, true, 1.2);
+    }
+
+    polesInstanced.instanceMatrix.needsUpdate = true;
+    bulbsInstanced.instanceMatrix.needsUpdate = true;
+    this.propsGroup.add(polesInstanced, bulbsInstanced);
   }
 
 
@@ -1459,8 +1711,12 @@ export class CityGenerator {
 
     // Street lights toggling based on dark times
     const isDark = timeOfDay === 'night' || timeOfDay === 'midnight' || weather === 'storm';
+    const scale = isDark ? 1.85 : 0;
+    this.culling.setStreetLightScale(scale);
+    this.destructibleProps.setStreetLightScale(scale);
     this.streetLights.forEach((light) => {
-      light.intensity = isDark ? 2.0 : 0;
+      light.intensity = scale;
+      light.visible = isDark;
     });
   }
 
@@ -1663,6 +1919,14 @@ export class CityGenerator {
       }
     }
 
+    // 1b. Check if player is inside La Casa de Hermanos courtyard or driveway spur
+    if (pos.x >= 68 && pos.x <= 102 && pos.z >= 32 && pos.z <= 80) {
+      return true;
+    }
+    if (pos.x >= 68 && pos.x <= 84 && pos.z >= -10 && pos.z <= 64) {
+      return true;
+    }
+
     // 4. Check City Grid Avenues & Cross Streets (when in track_city)
     if (this.activeTrackId === 'track_city') {
       // Central Avenue (x=0)
@@ -1706,13 +1970,15 @@ export class CityGenerator {
 
     // 1. Track-level city density
     res.cityDensity =
-      this.activeTrackId === 'track_city'
+      this.activeTrackId === 'track_city' || this.activeTrackId === 'track_neon_tokyo'
         ? 0.88
-        : this.activeTrackId === 'track_docks'
-          ? 0.55
-          : this.activeTrackId === 'track_coast'
-            ? 0.25
-            : 0.15;
+        : this.activeTrackId === 'track_san_bernard'
+          ? 0.72
+          : this.activeTrackId === 'track_docks'
+            ? 0.55
+            : this.activeTrackId === 'track_coast'
+              ? 0.25
+              : 0.15;
 
     // 2. Skyscraper proximity & height weighting (drives siren echoes)
     let skyscraperScore = 0;

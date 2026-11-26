@@ -328,13 +328,15 @@ export class CityTrafficSystem {
     if (waypoints.length < 12) return;
 
     const count =
-      trackId === 'track_city'
+      trackId === 'track_city' || trackId === 'track_neon_tokyo'
         ? 18
-        : trackId === 'track_coast'
-          ? 14
-          : trackId === 'track_docks'
-            ? 12
-            : 10;
+        : trackId === 'track_san_bernard'
+          ? 16
+          : trackId === 'track_coast'
+            ? 14
+            : trackId === 'track_docks'
+              ? 12
+              : 10;
 
     const variants: TrafficVehicle['variant'][] = ['sedan', 'coupe', 'taxi', 'suv'];
     const laneDist = Math.max(3.6, Math.min(5.2, roadHalfWidth * 0.44));

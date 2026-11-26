@@ -3,18 +3,66 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>THE LINE OF DRIFT</title>
-    <link rel="icon" type="image/jpeg" href="/assets/aistudio/IMG-20261111-WA0001_bc52fb29.jpg" />
+    <title>GRAND PROVED IT</title>
+    <link rel="icon" type="image/jpeg" href="/assets/aistudio/1795732487333_55b4f9ac.jpg" />
     <meta name="description" content="O melhor jogo de Drift e perseguição que você vai ver!" />
-    <meta property="og:title" content="THE LINE OF DRIFT" />
+    <meta property="og:title" content="GRAND PROVED IT" />
     <meta property="og:description" content="O melhor jogo de Drift e perseguição que você vai ver!" />
-    <meta property="og:image" content="/assets/aistudio/IMG-20261111-WA0001_bc52fb29.jpg" />
+    <meta property="og:image" content="/assets/aistudio/1795732412848_f9cc8f19.jpg" />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:image" content="/assets/aistudio/IMG-20261111-WA0001_bc52fb29.jpg" />
+    <meta name="twitter:image" content="/assets/aistudio/1795732412848_f9cc8f19.jpg" />
     <link rel="stylesheet" href="/src/index.css" />
   </head>
   <body>
+    <div
+      id="bootLoadingScreen"
+      class="game-loading-overlay"
+      role="status"
+      aria-live="polite"
+      style="position:fixed;inset:0;z-index:99999;background:radial-gradient(circle at 50% 25%,#081c4a 0%,#030816 70%,#02040a 100%);color:#f8fafc;display:flex;align-items:center;justify-content:center;padding:24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;"
+    >
+      <img
+        src="/assets/aistudio/1795732412848_f9cc8f19.jpg"
+        alt=""
+        class="loading-cover-bg"
+        referrerpolicy="no-referrer"
+        style="position:fixed;inset:0;width:100%;height:100%;object-fit:cover;opacity:0.2;pointer-events:none;"
+      />
+      <div class="loading-card">
+        <div class="loading-poster-wrap">
+          <img
+            src="/assets/aistudio/1795732406388_015ad713.jpg"
+            alt="Capa GRAND PROVED IT"
+            class="loading-poster"
+            referrerpolicy="no-referrer"
+          />
+        </div>
+        <div class="loading-info-col">
+          <div class="loading-kicker-row">
+            <img
+              src="/assets/aistudio/1795732487333_55b4f9ac.jpg"
+              alt="Logo GPI"
+              class="brand-logo-crest"
+              referrerpolicy="no-referrer"
+            />
+            <div class="loading-kicker">
+              <span class="loading-spinner" aria-hidden="true"></span>
+              <span>CARREGANDO MOTOR 3D</span>
+            </div>
+          </div>
+          <h1 class="loading-title">GRAND <span>PROVED IT</span></h1>
+          <p class="loading-status-text" id="bootLoadingText">Inicializando motor 3D e áudio...</p>
+          <div class="loading-progress-track">
+            <div class="loading-progress-fill" id="bootLoadingBarFill" style="width:14%;"></div>
+          </div>
+          <div class="loading-meta-row">
+            <span id="bootLoadingTip">Preparando ruas, tráfego e reflexos em tempo real...</span>
+            <strong id="bootLoadingPercent">14%</strong>
+          </div>
+        </div>
+      </div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/index.ts"></script>
   </body>

@@ -15,7 +15,7 @@ import { PolicePursuitSystem } from './police/PoliceAI';
 import { ReplayReturnSource, ReplaySystem } from './replay/ReplaySystem';
 import { networkStatus } from './services/networkStatus';
 import { FilmCutsceneDirector } from './story/FilmCutsceneDirector';
-import { getCareerFilmCutscenes, getCareerOpenWorldIntro } from './story/StoryData';
+import { getCareerFilmCutscenes, getCareerOpenWorldIntro, STORY_ENDINGS } from './story/StoryData';
 import { GameUI } from './ui/GameUI';
 import {
   CharacterProfile,
@@ -25,6 +25,7 @@ import {
   GraphicsQuality,
   MultiplayerPlayer,
   OpenWorldTransportMode,
+  PlayerControls,
   ReplayCameraAngle,
   StoryChapter,
   TimeOfDay,
@@ -155,8 +156,29 @@ export class OutlawGameScene extends xb.Script {
   private static readonly _wheelWorldPos = new THREE.Vector3();
   private static readonly _targetCamPos = new THREE.Vector3();
   private static readonly _targetLook = new THREE.Vector3();
+  private static readonly _effectiveControls: PlayerControls = {
+    throttle: 0,
+    brake: 0,
+    steer: 0,
+    handbrake: false,
+    nitro: false,
+    resetVehicle: false,
+    switchCamera: false,
+  };
+
+  private setBootLoadingStage(percent: number, text: string, tip?: string) {
+    const fill = document.getElementById('bootLoadingBarFill');
+    const pct = document.getElementById('bootLoadingPercent');
+    const label = document.getElementById('bootLoadingText');
+    const tipEl = document.getElementById('bootLoadingTip');
+    if (fill) (fill as HTMLElement).style.width = `${percent}%`;
+    if (pct) pct.textContent = `${percent}%`;
+    if (label) label.textContent = text;
+    if (tipEl && tip) tipEl.textContent = tip;
+  }
 
   init() {
+    this.setBootLoadingStage(22, 'Calibrando hardware e gráficos...', 'Detectando GPU e resolução ideal...');
     this.scene = xb.core.scene;
     this.camera = xb.core.camera;
     this.renderer = xb.core.renderer as THREE.WebGLRenderer;
@@ -188,6 +210,7 @@ export class OutlawGameScene extends xb.Script {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     // Studio Environment Reflections
+    this.setBootLoadingStage(38, 'Gerando iluminação e reflexos 3D...', 'Preparando atmosfera e shaders de pista...');
     const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
     this.scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
     pmremGenerator.dispose();
@@ -204,12 +227,18 @@ export class OutlawGameScene extends xb.Script {
     this.weatherSystem = new DynamicWeatherSystem(this.scene);
 
     // Initial Track & Atmosphere Setup
+    this.setBootLoadingStage(60, 'Construindo cidade e ruas 3D...', 'Gerando prédios, pistas e mansão La Casa de Hermanos...');
     this.city.generateTrack(this.activeTrackConfig, initialQuality);
     this.city.applyAtmosphere('night', 'rain', initialQuality);
+    this.setBootLoadingStage(78, 'Populando tráfego, NPCs e veículos...', 'Carregando carros de trânsito e pedestres...');
     this.repopulateNPCs(this.activeTrackConfig.id);
     this.repopulateTraffic(this.activeTrackConfig.id);
+    this.syncWeatherSystemRefs();
+    this.culling.registerObject(this.traffic.trafficGroup);
+    this.culling.registerObject(this.npcs.npcGroup);
 
     // Spawn Player Vehicle
+    this.setBootLoadingStage(90, 'Preparando garagem e perfil...', 'Sincronizando conta Google, controles e garagem...');
     this.setupPlayerVehicle(this.activeVehicleConfig);
     this.lastPlayerPos.copy(this.playerPhysics.position);
 
@@ -217,7 +246,9 @@ export class OutlawGameScene extends xb.Script {
     this.ui = new GameUI(this.profile, this.mpManager);
     this.ui.deviceSpecs = this.deviceSpecs;
     this.ui.quality = initialQuality;
-    this.weatherSystem.setWeather(this.ui.weather);
+    this.weatherSystem.setQuality(initialQuality);
+    this.weatherSystem.setWeather(this.ui.weather, true);
+    this.weatherSystem.setTimeOfDay(this.ui.timeOfDay);
     this.isVerticalMode = this.ui.isEffectiveVertical();
 
     this.police.setDifficulty(this.profile.difficulty || 'very_easy');
@@ -229,6 +260,26 @@ export class OutlawGameScene extends xb.Script {
 
     this.ui.renderEntryScreen();
     this.bindUICallbacks();
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        this.ui.hideBootLoading();
+      });
+    });
+  }
+
+  private syncWeatherSystemRefs() {
+    if (!this.weatherSystem || !this.city) return;
+    this.weatherSystem.sunLight = this.city.getSunLight();
+    this.weatherSystem.hemiLight = this.city.getHemiLight();
+    this.weatherSystem.streetLights = this.city.getStreetLights();
+    this.weatherSystem.lampBulbMaterials = this.city.getLampBulbMaterials();
+    this.weatherSystem.culling = this.culling;
+    this.weatherSystem.npcsSystem = this.npcs;
+    this.weatherSystem.destructibleProps = this.city.destructibleProps;
+    this.weatherSystem.clearRoadMaterials();
+    if (this.city.roadMaterial) {
+      this.weatherSystem.registerRoadMaterial(this.city.roadMaterial);
+    }
   }
 
   private repopulateNPCs(trackId: string) {
@@ -334,24 +385,36 @@ export class OutlawGameScene extends xb.Script {
       this.activeTrackConfig = track;
       this.city.generateTrack(track, this.ui.quality);
       this.city.applyAtmosphere(this.ui.timeOfDay, this.ui.weather, this.ui.quality);
-      this.weatherSystem.setWeather(this.ui.weather);
+      this.weatherSystem.setQuality(this.ui.quality);
+      this.weatherSystem.setWeather(this.ui.weather, true);
+      this.weatherSystem.setTimeOfDay(this.ui.timeOfDay);
       this.repopulateNPCs(track.id);
       this.repopulateTraffic(track.id);
+      this.syncWeatherSystemRefs();
+      this.culling.registerObject(this.traffic.trafficGroup);
+      this.culling.registerObject(this.npcs.npcGroup);
 
-      // Reset Player & Transport Mode
-      const startWp = this.city.waypoints[0] || { position: new THREE.Vector3(0, 0, 0), heading: 0 };
+      // Reset Player & Transport Mode (Spawn at La Casa de Hermanos in free_roam on The Jounnte; open road elsewhere)
+      const defaultStartWp = this.city.waypoints[0] || { position: new THREE.Vector3(0, 0, 0), heading: 0 };
+      const isMansionSpawn = mode === 'free_roam' && track.id === 'track_city';
+      const spawnPos = isMansionSpawn
+        ? new THREE.Vector3(78, 0, 56)
+        : defaultStartWp.position.clone();
+      const spawnHeading = isMansionSpawn ? Math.PI / 2 : defaultStartWp.heading;
+
       this.switchOpenWorldTransport('car', true);
       this.transportRig.clearParkedCarMarker();
       this.lastVehicleMode = 'car';
       this.lastTransportUiKey = '';
-      this.playerPhysics.reset(startWp.position, startWp.heading);
+      this.applyCareerCharacterToGameplay(mode);
+      this.playerPhysics.reset(spawnPos, spawnHeading);
       this.restorePlayerVehicleFull();
       if (this.playerVehicleMeshGroup) {
-        this.playerVehicleMeshGroup.position.copy(startWp.position);
-        this.playerVehicleMeshGroup.rotation.set(0, startWp.heading, 0);
+        this.playerVehicleMeshGroup.position.copy(spawnPos);
+        this.playerVehicleMeshGroup.rotation.set(0, spawnHeading, 0);
         this.playerVehicleMeshGroup.visible = true;
       }
-      this.lastPlayerPos.copy(startWp.position);
+      this.lastPlayerPos.copy(spawnPos);
       this.resetDriftSession();
       this.clearRemotePlayers();
 
@@ -364,8 +427,7 @@ export class OutlawGameScene extends xb.Script {
           (pos, y) => this.city.getRoadElevation(pos, y)
         );
         this.spawnOpenWorldStreetMotos();
-        this.ui.updateOpenWorldTransportUI('car', null);
-        this.police.setHeat(0, startWp.position, this.city.waypoints);
+        this.police.setHeat(0, spawnPos, this.city.waypoints);
         void this.playFilmCutscene(
           getCareerOpenWorldIntro(
             this.profile.name,
@@ -377,12 +439,27 @@ export class OutlawGameScene extends xb.Script {
         );
       } else {
         this.openWorld.clear();
-        this.transportRig.clearStreetMotorcycles();
+        if (mode === 'free_roam') {
+          this.spawnOpenWorldStreetMotos();
+        } else {
+          this.transportRig.clearStreetMotorcycles();
+        }
         if (mode === 'story' && chapter) {
-          this.police.setHeat(chapter.initialHeat, startWp.position, this.city.waypoints);
-          void this.playFilmCutscene(chapter.dialogueIntro, `HISTÓRIA · CAPÍTULO ${chapter.id}`);
+          if (chapter.id === 1) {
+            // Prison break begins at night right after the driverless sports car explodes the outer wall
+            this.city.applyAtmosphere('night', this.ui.weather, this.ui.quality);
+            this.weatherSystem.setTimeOfDay('night');
+          }
+          this.police.setHeat(chapter.initialHeat, spawnPos, this.city.waypoints);
+          void this.playFilmCutscene(chapter.dialogueIntro, `HISTÓRIA · CAPÍTULO ${chapter.id}`).then(() => {
+            if (this.currentMode === 'story' && this.currentStoryChapter?.id === 1) {
+              sound.playCollisionSound(1.0);
+              sound.playThunderRumble();
+              this.ui.showToast('💥 O carro esportivo sem controle explodiu o muro final! Fuja por The Jounnte!');
+            }
+          });
         } else if (mode === 'career') {
-          this.police.setHeat(1, startWp.position, this.city.waypoints);
+          this.police.setHeat(1, spawnPos, this.city.waypoints);
           const careerScenes = getCareerFilmCutscenes(
             this.profile.name,
             this.profile.nickname,
@@ -392,18 +469,25 @@ export class OutlawGameScene extends xb.Script {
           );
           void this.playFilmCutscene(careerScenes.intro, `CARREIRA · ${track.name.toUpperCase()}`);
         } else if (mode === 'challenge') {
-          this.police.setHeat(4, startWp.position, this.city.waypoints);
+          this.police.setHeat(4, spawnPos, this.city.waypoints);
         } else if (mode === 'tutorial') {
           this.police.clearAll();
         } else if (mode === 'free_roam') {
-          this.police.setHeat(0, startWp.position, this.city.waypoints);
+          this.police.setHeat(0, spawnPos, this.city.waypoints);
         } else if (mode === 'multiplayer') {
-          this.police.setHeat(2, startWp.position, this.city.waypoints);
+          this.police.setHeat(2, spawnPos, this.city.waypoints);
         } else {
-          this.police.setHeat(1, startWp.position, this.city.waypoints);
+          this.police.setHeat(1, spawnPos, this.city.waypoints);
         }
       }
 
+      if (isMansionSpawn) {
+        this.ui.showToast('🎩 Spawn em La Casa de Hermanos — Mansão de Luca & Miguel!');
+      } else if (mode === 'tutorial') {
+        this.ui.showToast('🛣️ Tutorial iniciado em uma rua aberta! Siga os passos na tela.');
+      }
+
+      this.ui.updateOpenWorldTransportUI('car', null);
       sound.ensureRunning();
       sound.playCountdownBeep(true);
     };
@@ -411,7 +495,7 @@ export class OutlawGameScene extends xb.Script {
     // Open World Multi-Transport Selector (Motos, Car, Bicycle, Skate, On Foot)
     this.ui.onSelectOpenWorldTransport = (mode) => {
       if (
-        this.currentMode !== 'career_open_world' ||
+        this.currentMode === 'title' ||
         this.isOpenWorldBustedPaused ||
         this.ui.isPaused ||
         this.filmDirector.active
@@ -506,8 +590,11 @@ export class OutlawGameScene extends xb.Script {
           : Math.min(window.devicePixelRatio, quality === 'ultra' ? 2 : 1.5)
       );
       this.renderer.shadowMap.enabled = quality !== 'low';
+      this.weatherSystem.setQuality(quality);
       this.weatherSystem.setWeather(weather);
+      this.weatherSystem.setTimeOfDay(timeOfDay);
       this.city.applyAtmosphere(timeOfDay, weather, quality);
+      this.syncWeatherSystemRefs();
     };
 
     // Customization / Vehicle Changed
@@ -517,11 +604,19 @@ export class OutlawGameScene extends xb.Script {
 
     // Track Changed
     this.ui.onTrackChanged = (track: TrackConfig) => {
-      this.activeTrackConfig = track;
-      this.city.generateTrack(track, this.ui.quality);
-      this.city.applyAtmosphere(this.ui.timeOfDay, this.ui.weather, this.ui.quality);
-      this.repopulateNPCs(track.id);
-      this.repopulateTraffic(track.id);
+      this.ui.showTransitionLoading('CARREGANDO MAPA', `Preparando ${track.name}...`);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          this.activeTrackConfig = track;
+          this.city.generateTrack(track, this.ui.quality);
+          this.city.applyAtmosphere(this.ui.timeOfDay, this.ui.weather, this.ui.quality);
+          this.weatherSystem.setTimeOfDay(this.ui.timeOfDay);
+          this.repopulateNPCs(track.id);
+          this.repopulateTraffic(track.id);
+          this.syncWeatherSystemRefs();
+          window.setTimeout(() => this.ui.hideTransitionLoading(), 220);
+        });
+      });
     };
 
     // Cloud Save Restored (Google Drive)
@@ -560,6 +655,17 @@ export class OutlawGameScene extends xb.Script {
         sound.stopAll();
       }
       if (!paused) {
+        this.clock.getDelta();
+      }
+    };
+
+    // Smartphone Protection System (Freezes offline world, cops & inputs while on phone)
+    this.ui.onSmartphoneOpenChanged = (open) => {
+      this.ui.resetDrivingControls();
+      if (open && this.currentMode !== 'multiplayer') {
+        sound.stopAll();
+      }
+      if (!open) {
         this.clock.getDelta();
       }
     };
@@ -935,6 +1041,7 @@ export class OutlawGameScene extends xb.Script {
         Math.cos(this.orbitAngle) * radius
       );
       this.camera.lookAt(0, 1.2, 0);
+      this.weatherSystem.update(dt, this.camera.position, this.city.roadMaterial);
       this.npcs.update(dt, this.camera.position, 0, this.city.waypoints, this.city.roadHalfWidth);
       this.traffic.update(
         dt,
@@ -971,6 +1078,7 @@ export class OutlawGameScene extends xb.Script {
         this.filmDirector.elapsed
       );
       this.city.update(dt, this.playerPhysics.position, this.ui.weather);
+      this.weatherSystem.update(dt, this.camera.position, this.city.roadMaterial);
       this.npcs.update(dt, this.playerPhysics.position, 0, this.city.waypoints, this.city.roadHalfWidth);
       this.traffic.update(
         dt,
@@ -985,16 +1093,16 @@ export class OutlawGameScene extends xb.Script {
       return;
     }
 
-    // Pause Handling:
-    // - Offline modes freeze the entire simulation cleanly while the Pause menu is open.
+    // Pause & Smartphone Shield Handling:
+    // - Offline modes freeze the entire simulation cleanly while Pause or Smartphone is open,
+    //   preventing police busts, collisions, and drift loss while browsing apps.
     // - Online multiplayer keeps running live without freezing so other players aren't harmed;
-    //   only local driving inputs stay neutralized while paused.
-    if (this.ui.isPaused) {
-      this.ui.controls.throttle = 0;
-      this.ui.controls.brake = 0;
-      this.ui.controls.steer = 0;
-      this.ui.controls.handbrake = false;
-      this.ui.controls.nitro = false;
+    //   only local driving inputs stay neutralized while paused or on the phone.
+    if (this.ui.isPaused || this.ui.smartphone?.isOpen) {
+      this.ui.resetDrivingControls();
+      if (this.ui.smartphone?.isOpen && this.currentMode === 'tutorial' && !this.ui.isPaused) {
+        this.ui.trackTutorialFrame(0, 0, this.ui.controls, false, this.transportRig.activeMode, true);
+      }
       if (this.currentMode !== 'multiplayer') {
         return;
       }
@@ -1045,13 +1153,33 @@ export class OutlawGameScene extends xb.Script {
     }
 
     const targetHeight = rampCheck.hit ? rampCheck.height : groundHeight;
-    const isNonCarMode =
-      this.currentMode === 'career_open_world' && this.transportRig.activeMode !== 'car';
+    const isNonCarMode = this.transportRig.activeMode !== 'car';
     const activeSpec = OPEN_WORLD_TRANSPORTS[this.transportRig.activeMode];
+    const hudStyle = this.ui.getHudControlStyle();
+    const isAutoThrottleHud = hudStyle === 'nfs_tap' || hudStyle === 'auto_gas';
+
+    const effectiveControls = OutlawGameScene._effectiveControls;
+    effectiveControls.throttle = this.ui.controls.throttle;
+    effectiveControls.brake = this.ui.controls.brake;
+    effectiveControls.steer = this.ui.controls.steer;
+    effectiveControls.handbrake = this.ui.controls.handbrake;
+    effectiveControls.nitro = this.ui.controls.nitro;
+    effectiveControls.resetVehicle = this.ui.controls.resetVehicle;
+    effectiveControls.switchCamera = this.ui.controls.switchCamera;
+
+    if (
+      isAutoThrottleHud &&
+      this.transportRig.activeMode !== 'foot' &&
+      !this.ui.smartphone?.isOpen &&
+      effectiveControls.brake === 0
+    ) {
+      effectiveControls.throttle = Math.max(effectiveControls.throttle, 1);
+    }
+
     let driftPointsAwarded = 0;
 
     if (isNonCarMode) {
-      const owStep = this.transportRig.stepPhysics(dt, this.ui.controls, targetHeight, this.playerPhysics);
+      const owStep = this.transportRig.stepPhysics(dt, effectiveControls, targetHeight, this.playerPhysics);
       driftPointsAwarded = owStep.wheelieAwarded;
       if (owStep.jumpTriggered && this.stuntToastCooldown <= 0) {
         this.stuntToastCooldown = 1.4;
@@ -1066,7 +1194,7 @@ export class OutlawGameScene extends xb.Script {
     } else {
       const physicsStep = this.playerPhysics.update(
         dt,
-        this.ui.controls,
+        effectiveControls,
         targetHeight,
         this.weatherSystem.currentGripMultiplier,
         this.weatherSystem.currentBrakingMultiplier
@@ -1083,9 +1211,9 @@ export class OutlawGameScene extends xb.Script {
     this.ui.achievements.recordSpeed(this.playerPhysics.speedKmh);
 
     // Off-road Penalty: 20 pts/s on 'very_easy', scaling up to 70 pts/s on 'professional'
-    // Disabled in Career Open World (GTA-style) so players can cut alleys, plazas & shortcuts freely.
+    // Disabled in Career Open World (GTA-style) and on-foot / bike so players can explore freely.
     const isOnRoad = this.city.isPositionOnRoadway(this.playerPhysics.position);
-    if (!isOnRoad && !this.isCinematicActive && this.currentMode !== 'career_open_world') {
+    if (!isOnRoad && !this.isCinematicActive && this.currentMode !== 'career_open_world' && !isNonCarMode) {
       const penaltyRates: Record<GameDifficulty, number> = {
         very_easy: 20,
         easy: 25,
@@ -1121,9 +1249,13 @@ export class OutlawGameScene extends xb.Script {
     // 4. City Environment, Props & Accessible Locations
     this.city.update(dt, this.playerPhysics.position, this.ui.weather);
 
-    // 4a. Dynamic Weather System & HUD Overlays
+    // 4a. Dynamic Weather & Real-Time Day-Night System + HUD Overlays
     const isLightning = this.weatherSystem.update(dt, this.camera.position, this.city.roadMaterial);
-    this.ui.updateWeatherHUD(this.weatherSystem.currentWeather, isLightning);
+    this.ui.updateWeatherHUD(
+      this.weatherSystem.currentWeather,
+      isLightning,
+      this.weatherSystem.getClockInfo()
+    );
 
     // 4b. Destructible Props Collision (trees, lamp posts, traffic lights)
     const propHit = this.city.checkDestructiblePropCollision(
@@ -1315,11 +1447,12 @@ export class OutlawGameScene extends xb.Script {
       );
 
       if (rbCollision.spikeHit) {
-        this.playerPhysics.health = Math.max(0, this.playerPhysics.health - 25);
+        const spikeDmg = Math.round(25 * this.playerPhysics.damageTakenMultiplier);
+        this.playerPhysics.health = Math.max(0, this.playerPhysics.health - spikeDmg);
         this.playerPhysics.velocity.multiplyScalar(0.5);
         this.playerPhysics.speedKmh *= 0.5;
         sound.playCollisionSound(0.85);
-        this.ui.showToast('💥 FITA DE PREGOS (SPIKE STRIP)! PNEUS FURADOS (-25% SAÚDE)');
+        this.ui.showToast(`💥 FITA DE PREGOS (SPIKE STRIP)! PNEUS FURADOS (-${spikeDmg} SAÚDE)`);
         if (!isNonCarMode) {
           this.maybeDetachWheel(OutlawGameScene._localHitDir, 24, true);
         }
@@ -1336,7 +1469,8 @@ export class OutlawGameScene extends xb.Script {
           // High-speed breach! Smash through the cruisers
           this.police.smashRoadblock(rbCollision.roadblockIndex);
           this.playerPhysics.applyCollisionImpulse(rbCollision.normal, impactSpeedKmh * 0.25);
-          this.playerPhysics.health = Math.max(0, this.playerPhysics.health - 12);
+          const breachDmg = Math.round(12 * this.playerPhysics.damageTakenMultiplier);
+          this.playerPhysics.health = Math.max(0, this.playerPhysics.health - breachDmg);
           this.profile.cash += 1500;
           this.playerPhysics.driftScore += 1000;
           sound.playSuccessFanfare();
@@ -1344,7 +1478,8 @@ export class OutlawGameScene extends xb.Script {
         } else {
           // Too slow to smash through: bounced back
           this.playerPhysics.applyCollisionImpulse(rbCollision.normal, Math.max(12, impactSpeedKmh * 0.45));
-          this.playerPhysics.health = Math.max(0, this.playerPhysics.health - 15);
+          const bounceDmg = Math.round(15 * this.playerPhysics.damageTakenMultiplier);
+          this.playerPhysics.health = Math.max(0, this.playerPhysics.health - bounceDmg);
           sound.playCollisionSound(0.9);
           this.ui.showToast('⚠️ BLOQUEIO POLICIAL! IMPACTO FORTE');
         }
@@ -1567,10 +1702,10 @@ export class OutlawGameScene extends xb.Script {
     }
 
     // Update nearby mountable prompt (GTA "[F] Entrar no Carro / Montar Moto")
-    if (this.currentMode === 'career_open_world') {
+    if (this.transportRig) {
       let nearLabel: string | null = null;
       if (this.transportRig.activeMode === 'foot') {
-        const mount = this.transportRig.findNearestMountable(this.playerPhysics.position, 5.8);
+        const mount = this.transportRig.findNearestMountable(this.playerPhysics.position, 6.5);
         if (mount) {
           nearLabel =
             mount.type === 'car'
@@ -1667,7 +1802,7 @@ export class OutlawGameScene extends xb.Script {
       this.police.heatLevel,
       pursuitResult.closestCopDist,
       envAcoustics,
-      this.currentMode === 'career_open_world' ? activeSpec.enginePitchMult : 1.0
+      isNonCarMode ? activeSpec.enginePitchMult : 1.0
     );
 
     // 8. Update HUD & Telemetry
@@ -1675,12 +1810,17 @@ export class OutlawGameScene extends xb.Script {
       .filter((c) => !c.destroyed)
       .map((c) => ({ x: c.position.x, z: c.position.z }));
 
+    const healthPercent =
+      this.playerPhysics.maxHealth > 0
+        ? (this.playerPhysics.health / this.playerPhysics.maxHealth) * 100
+        : this.playerPhysics.health;
+
     this.ui.updateHUD(
       this.playerPhysics.speedKmh,
       isNonCarMode ? activeSpec.gearTag : this.playerPhysics.gear,
       this.playerPhysics.rpm,
       this.playerPhysics.nitroReserve,
-      this.playerPhysics.health,
+      healthPercent,
       this.police.heatLevel,
       pursuitResult.statusText,
       this.playerPhysics.isDrifting,
@@ -1691,6 +1831,18 @@ export class OutlawGameScene extends xb.Script {
       openWorldHud,
       openWorldMarkers
     );
+
+    // 8b. Update Step-by-Step Interactive Tutorial Tracker
+    if (this.currentMode === 'tutorial') {
+      this.ui.trackTutorialFrame(
+        dt,
+        this.playerPhysics.speedKmh,
+        effectiveControls,
+        this.playerPhysics.isDrifting,
+        this.transportRig.activeMode,
+        Boolean(this.ui.smartphone?.isOpen)
+      );
+    }
 
     // 9. Real Online Multiplayer Telemetry Broadcast & Remote 3D Cars
     if (this.currentMode === 'multiplayer') {
@@ -1720,17 +1872,56 @@ export class OutlawGameScene extends xb.Script {
       dt,
       this.playerPhysics,
       this.police.cops,
-      this.ui.controls.nitro && this.playerPhysics.nitroReserve > 2
+      effectiveControls.nitro && this.playerPhysics.nitroReserve > 2
     );
 
     // 11. Check Win / Loss / Bust conditions
     this.checkGameRules(pursuitResult.busted, pursuitResult.escaped, heatBeforePursuitUpdate);
   }
 
+  private applyCareerCharacterToGameplay(mode: GameMode) {
+    const careerChar = this.profile.careerCharacter;
+    if (careerChar?.appearance) {
+      this.transportRig?.applyCharacterAppearance(careerChar.appearance);
+    }
+
+    const isCareerMode = mode === 'career' || mode === 'career_open_world';
+    if (!isCareerMode || !careerChar?.stats) {
+      this.playerPhysics?.setCareerStatModifiers(undefined);
+      this.transportRig?.setCareerStatModifiers(undefined);
+      return;
+    }
+
+    const clampStat = (v: number) => Math.max(0, Math.min(70, Number(v) || 0)) / 70;
+    const s = clampStat(careerChar.stats.speed);
+    const a = clampStat(careerChar.stats.agility);
+    const d = clampStat(careerChar.stats.driving);
+    const h = clampStat(careerChar.stats.health);
+
+    this.playerPhysics?.setCareerStatModifiers({
+      speedMult: 1 + s * 0.25,
+      accelMult: 1 + s * 0.28,
+      turnMult: 1 + a * 0.26,
+      nitroRegenMult: 1 + a * 0.55,
+      gripMult: 1 + d * 0.32,
+      brakeMult: 1 + d * 0.28,
+      driftScoreMult: 1 + d * 0.45,
+      healthMult: 1 + h * 0.80,
+      damageTakenMult: 1 - h * 0.35,
+    });
+
+    this.transportRig?.setCareerStatModifiers({
+      speedMult: 1 + s * 0.32,
+      accelMult: 1 + s * 0.35,
+      agilityMult: 1 + a * 0.38,
+      drivingMult: 1 + d * 0.35,
+    });
+  }
+
   private restorePlayerVehicleFull() {
     if (!this.playerPhysics) return;
-    const armorBoost = 1 + (this.playerPhysics.config.levelArmor - 1) * 0.2;
-    this.playerPhysics.health = 100 * armorBoost;
+    this.playerPhysics.applyUpgrades();
+    this.playerPhysics.health = this.playerPhysics.maxHealth;
     this.playerPhysics.nitroReserve = 100;
     this.playerPhysics.missingWheels = [false, false, false, false];
     this.playerWheels.forEach((w) => {
@@ -1792,12 +1983,20 @@ export class OutlawGameScene extends xb.Script {
     // Health zero = Wrecked
     if (this.playerPhysics.health <= 0) {
       this.playerPhysics.health = 0;
+      if (this.currentMode === 'story' && this.currentStoryChapter?.id === 5) {
+        this.triggerBadEndingFallback();
+        return;
+      }
       this.endGameRound('busted', 'VEÍCULO TOTALMENTE DESTRUÍDO', 'Seu carro não aguentou os impactos das viaturas e bateu feio.', 500, 20);
       return;
     }
 
     if (isBusted) {
-      this.endGameRound('busted', 'PRESO PELA POLÍCIA!', 'Você foi cercado e detido pelas viaturas do Capitão Ramos.', 1000, 50);
+      if (this.currentMode === 'story' && this.currentStoryChapter?.id === 5) {
+        this.triggerBadEndingFallback();
+        return;
+      }
+      this.endGameRound('busted', 'PRESO PELA POLÍCIA!', 'Você foi cercado e detido pelas forças policiais.', 1000, 50);
       return;
     }
 
@@ -1814,17 +2013,29 @@ export class OutlawGameScene extends xb.Script {
         this.playerPhysics.velocity.set(0, 0, 0);
         this.playerPhysics.speedKmh = 0;
         sound.stopAll();
-        void this.playFilmCutscene(chapter.dialogueOutro, `HISTÓRIA · FINAL DO CAPÍTULO ${chapter.id}`).then(() => {
-          this.isEndingOutroCutscene = false;
-          if (this.currentMode !== 'title') {
-            this.endGameRound(
-              'victory',
-              'MISSÃO CUMPRIDA: FUGA BEM-SUCEDIDA!',
-              'Você e Miguel escaparam com maestria do cerco policial!',
-              chapter.rewardCash,
-              chapter.rewardRep
-            );
+        void this.playFilmCutscene(chapter.dialogueOutro, `HISTÓRIA · FINAL DO CAPÍTULO ${chapter.id}`).then(async () => {
+          if (this.currentMode === 'title') {
+            this.isEndingOutroCutscene = false;
+            return;
           }
+          if (chapter.id === 5) {
+            const chosenEndingId = await this.ui.showStoryEndingChoiceModal();
+            const endingInfo = STORY_ENDINGS[chosenEndingId];
+            await this.playFilmCutscene(endingInfo.epilogueLines, endingInfo.badge);
+            this.isEndingOutroCutscene = false;
+            if ((this.currentMode as GameMode) !== 'title') {
+              this.finishStoryEnding(endingInfo.id);
+            }
+            return;
+          }
+          this.isEndingOutroCutscene = false;
+          this.endGameRound(
+            'victory',
+            'MISSÃO CUMPRIDA: FUGA BEM-SUCEDIDA!',
+            'Miguel e Luca escaparam com maestria ao lado da equipe!',
+            chapter.rewardCash,
+            chapter.rewardRep
+          );
         });
       } else if (this.currentMode === 'career') {
         this.profile.totalEscapes++;
@@ -1906,6 +2117,15 @@ export class OutlawGameScene extends xb.Script {
       });
     });
 
+    // Mansion courtyard street bike when playing Free Roam at La Casa de Hermanos
+    if (this.currentMode === 'free_roam') {
+      spots.push({
+        pos: new THREE.Vector3(82, 0, 44),
+        heading: Math.PI / 2,
+        mode: 'moto_super',
+      });
+    }
+
     this.transportRig.populateStreetMotorcycles(spots);
   }
 
@@ -1933,6 +2153,22 @@ export class OutlawGameScene extends xb.Script {
         this.playerVehicleMeshGroup.position.copy(this.transportRig.parkedCarPos);
         this.playerVehicleMeshGroup.rotation.set(0, this.transportRig.parkedCarHeading, 0);
       }
+    } else if (mode !== 'car' && !this.transportRig.hasParkedCar) {
+      this.transportRig.markParkedCar(this.playerPhysics.position, this.playerPhysics.heading);
+      if (this.playerVehicleMeshGroup) {
+        this.playerVehicleMeshGroup.visible = true;
+        this.playerVehicleMeshGroup.position.copy(this.transportRig.parkedCarPos);
+        this.playerVehicleMeshGroup.rotation.set(0, this.transportRig.parkedCarHeading, 0);
+      }
+    }
+
+    // If leaving a motorcycle on foot, leave that motorcycle parked at the curb
+    if (prevMode !== 'car' && prevMode !== 'foot' && mode === 'foot') {
+      this.transportRig.parkMotorcycle(
+        this.playerPhysics.position,
+        this.playerPhysics.heading,
+        prevMode
+      );
     }
 
     // Entering a specific parked street motorcycle removes that parked prop from the curb
@@ -1950,9 +2186,15 @@ export class OutlawGameScene extends xb.Script {
     }
 
     if (mode === 'car') {
+      if (!mountAt && this.transportRig.hasParkedCar) {
+        this.playerPhysics.position.copy(this.transportRig.parkedCarPos);
+        this.playerPhysics.heading = this.transportRig.parkedCarHeading;
+      }
       this.transportRig.clearParkedCarMarker();
       if (this.playerVehicleMeshGroup) {
         this.playerVehicleMeshGroup.visible = true;
+        this.playerVehicleMeshGroup.position.copy(this.playerPhysics.position);
+        this.playerVehicleMeshGroup.rotation.set(0, this.playerPhysics.heading, 0);
       }
     } else if (prevMode !== 'foot' && mode === 'foot' && !silent) {
       // Step out to the left side of the vehicle so the player stands clearly beside it
@@ -2028,9 +2270,21 @@ export class OutlawGameScene extends xb.Script {
       return;
     }
 
-    const mount = this.transportRig.findNearestMountable(this.playerPhysics.position, 5.8);
+    const mount = this.transportRig.findNearestMountable(this.playerPhysics.position, 6.5);
     if (mount) {
       this.switchOpenWorldTransport(mount.mode, false, mount);
+      return;
+    }
+
+    if (this.transportRig.hasParkedCar) {
+      const d = this.playerPhysics.position.distanceTo(this.transportRig.parkedCarPos);
+      this.switchOpenWorldTransport('car', false, {
+        position: this.transportRig.parkedCarPos,
+        heading: this.transportRig.parkedCarHeading,
+      });
+      if (d > 10) {
+        this.ui.showToast('🚗 Você retornou ao seu carro estacionado!');
+      }
       return;
     }
 
@@ -2040,6 +2294,8 @@ export class OutlawGameScene extends xb.Script {
   }
 
   private handleLocationInteraction() {
+    const prevCash = this.profile.cash;
+    const prevRep = this.profile.repPoints;
     const dummyState = {
       health: this.playerPhysics.health,
       nitroReserve: this.playerPhysics.nitroReserve,
@@ -2061,6 +2317,14 @@ export class OutlawGameScene extends xb.Script {
       }
       this.playerPhysics.health = dummyState.health;
       this.playerPhysics.nitroReserve = dummyState.nitroReserve;
+      this.profile.cash = dummyState.cash;
+      this.profile.repPoints = dummyState.rep;
+      while (this.profile.repPoints >= this.profile.repLevel * 1000) {
+        this.profile.repLevel++;
+      }
+      if (this.profile.cash !== prevCash || this.profile.repPoints !== prevRep) {
+        this.ui.persistDurableProgress();
+      }
       if (dummyState.health >= 100) {
         this.restorePlayerVehicleFull();
       }
@@ -2082,6 +2346,30 @@ export class OutlawGameScene extends xb.Script {
     this.police.clearAll();
     sound.stopAll();
     this.ui.showGameResultModal(type, title, desc, cash, rep);
+  }
+
+  private triggerBadEndingFallback() {
+    const ending = STORY_ENDINGS.bad;
+    this.isEndingOutroCutscene = true;
+    this.police.clearAll();
+    this.playerPhysics.velocity.set(0, 0, 0);
+    this.playerPhysics.speedKmh = 0;
+    sound.stopAll();
+    void this.playFilmCutscene(ending.epilogueLines, ending.badge).then(() => {
+      this.isEndingOutroCutscene = false;
+      this.finishStoryEnding('bad');
+    });
+  }
+
+  private finishStoryEnding(endingId: 'true' | 'good' | 'bad' | 'false') {
+    this.currentMode = 'title';
+    this.switchOpenWorldTransport('car', true);
+    this.transportRig.clearParkedCarMarker();
+    this.transportRig.clearStreetMotorcycles();
+    this.openWorld.clear();
+    this.police.clearAll();
+    sound.stopAll();
+    this.ui.showStoryEndingResultModal(endingId, false);
   }
 
   private findNearestWaypoint(pos: THREE.Vector3) {
@@ -2117,7 +2405,9 @@ export class OutlawGameScene extends xb.Script {
       forceLoss ||
       (impactSpeedMs >= 21 && isCornerOrSideHit) ||
       impactSpeedMs >= 28 ||
-      (missingCount === 0 && this.playerPhysics.health < 62 && impactSpeedMs >= 13);
+      (missingCount === 0 &&
+        this.playerPhysics.health < this.playerPhysics.maxHealth * 0.62 &&
+        impactSpeedMs >= 13);
 
     if (!shouldDetach) return;
 
@@ -2282,7 +2572,7 @@ export class OutlawGameScene extends xb.Script {
 // App Entry Point
 document.addEventListener('DOMContentLoaded', () => {
   const options = new xb.Options();
-  options.setAppTitle('THE LINE OF DRIFT');
+  options.setAppTitle('GRAND PROVED IT');
   options.setAppDescription('O melhor jogo de Drift e perseguição que você vai ver!');
 
   xb.add(new OutlawGameScene());

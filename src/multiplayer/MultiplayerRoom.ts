@@ -338,6 +338,14 @@ export class MultiplayerRoomManager {
     }
   }
 
+  public extendSession(repLevel: number, playerName: string) {
+    this.send({
+      type: 'EXTEND_SESSION',
+      repLevel,
+      playerName,
+    });
+  }
+
   // --- Server-backed Online Leaderboard Helpers ---
   public static async fetchServerLeaderboard(): Promise<LeaderboardEntry[]> {
     if (!networkStatus.isOnline) return [];

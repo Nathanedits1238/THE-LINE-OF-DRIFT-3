@@ -12,6 +12,12 @@ export type GraphicsQuality = 'low' | 'medium' | 'high' | 'ultra';
 export type WeatherType = 'sunny' | 'rain' | 'storm' | 'fog';
 export type TimeOfDay = 'day' | 'sunset' | 'night' | 'midnight';
 export type OrientationMode = 'auto' | 'horizontal' | 'vertical';
+export type HudControlStyle =
+  | 'classic'
+  | 'nfs_tap'
+  | 'nfs_pedals'
+  | 'joystick'
+  | 'auto_gas';
 
 export type OpenWorldTransportMode =
   | 'car'
@@ -67,6 +73,26 @@ export type GameDifficulty =
   | 'legendary'
   | 'professional';
 
+export interface CareerCharacterStats {
+  speed: number; // Velocidade (0..70)
+  agility: number; // Agilidade (0..70)
+  driving: number; // Qualidade para Dirigir (0..70)
+  health: number; // Integridade Corporal / Saúde (0..70)
+}
+
+export interface CareerCharacterAppearance {
+  skinTone: string;
+  jacketColor: string;
+  pantsColor: string;
+  build: 'lean' | 'athletic' | 'heavy';
+}
+
+export interface CareerCharacterConfig {
+  created: boolean;
+  stats: CareerCharacterStats;
+  appearance: CareerCharacterAppearance;
+}
+
 export interface CharacterProfile {
   name: string;
   nickname: string;
@@ -84,11 +110,32 @@ export interface CharacterProfile {
   storyChapter: number;
   unlockedChallenges: number;
   controlsMode: 'touch' | 'gyro' | 'keyboard';
+  hudControlStyle?: HudControlStyle;
+  tutorialCompleted?: boolean;
   gyroSensitivity: number;
   difficulty: GameDifficulty;
   openWorldEscapes?: number;
   openWorldStashes?: number;
   openWorldMaxHeatEscaped?: number;
+  unlockedEndings?: StoryEndingId[];
+  lastStoryEnding?: StoryEndingId;
+  careerCharacter?: CareerCharacterConfig;
+}
+
+export type StoryEndingId = 'true' | 'good' | 'bad' | 'false';
+
+export interface StoryEndingInfo {
+  id: StoryEndingId;
+  badge: string;
+  title: string;
+  subtitle: string;
+  summary: string;
+  choiceLabel: string;
+  choiceDescription: string;
+  toneClass: 'ending-true' | 'ending-good' | 'ending-bad' | 'ending-false';
+  epilogueLines: DialogueLine[];
+  rewardCash: number;
+  rewardRep: number;
 }
 
 export type FilmCameraShot =
@@ -118,8 +165,19 @@ export interface StoryChapter {
 
 export interface DialogueLine {
   speaker: string;
-  role?: 'pilot' | 'copilot' | 'cop' | 'dispatch' | 'rival';
-  portrait: 'luca' | 'miguel' | 'pilot' | 'copilot' | 'cop' | 'dispatch' | 'rival';
+  role?: 'pilot' | 'copilot' | 'ally' | 'guard' | 'cop' | 'dispatch' | 'rival';
+  portrait:
+    | 'luca'
+    | 'miguel'
+    | 'alan'
+    | 'andre'
+    | 'ana'
+    | 'guard'
+    | 'pilot'
+    | 'copilot'
+    | 'cop'
+    | 'dispatch'
+    | 'rival';
   text: string;
   radioEffect?: boolean;
   cameraShot?: FilmCameraShot;
@@ -158,21 +216,32 @@ export interface MultiplayerPlayer {
 
 export interface OnlineRoomSummary {
   code: string;
+  name?: string;
   trackId: string;
   hostName: string;
   status: 'lobby' | 'racing' | 'finished';
   playerCount: number;
   maxPlayers: number;
   createdAt: number;
+  isOfficial?: boolean;
+  timeRemainingSec?: number;
+  sessionDurationSec?: number;
+  bonusUnlockedBy?: string | null;
 }
 
 export interface MultiplayerRoom {
-  code: string; // 4 digits e.g. "4829"
+  code: string; // 4 digits e.g. "1001", "4829"
+  name?: string;
   trackId: string;
   hostName: string;
   status: 'lobby' | 'racing' | 'finished';
   players: MultiplayerPlayer[];
   createdAt: number;
+  maxPlayers?: number;
+  isOfficial?: boolean;
+  timeRemainingSec?: number;
+  sessionDurationSec?: number;
+  bonusUnlockedBy?: string | null;
 }
 
 export interface LeaderboardEntry {

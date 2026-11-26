@@ -48,6 +48,7 @@ export interface SmartphoneCallbacks {
   onRepBonus?: (amount: number) => void;
   onShowToast?: (message: string) => void;
   onSpawnCar?: (carId: string) => void;
+  onOpenStateChanged?: (isOpen: boolean) => void;
 }
 
 export class SmartphoneSystem {
@@ -62,6 +63,19 @@ export class SmartphoneSystem {
   private contacts: ChatContact[] = [];
   private activeChatContactId: string = 'luca';
   private contracts: StreetContract[] = [];
+  private containerRoot: HTMLElement | null = null;
+  private lastPlayerPos?: { x: number; y: number; z: number };
+  private currentWeather: WeatherType = 'rain';
+  private activeRadioChannelIndex: number = 0;
+  private isRadioPlaying: boolean = true;
+  private portalSearchQuery: string = '';
+
+  private readonly radioChannels: Array<{ label: string; track: string }> = [
+    { label: '📻 104.2 Neon Waves (Synth)', track: 'Midnight Phonk & Synthwave 24/7' },
+    { label: '🔥 98.7 Tokyo Drift Phonk', track: 'Drift King Bassline · DJ Kaito' },
+    { label: '⚡ 106.9 Cyberpunk Bass D&B', track: 'Overdrive Expressway Mix' },
+    { label: '🕶️ 92.5 Underground Hip-Hop', track: 'La Casa Beats · Luca & Miguel Tape' },
+  ];
 
   // Social feed like counters state
   public bleeterLikes: Record<string, number> = {
@@ -245,29 +259,120 @@ export class SmartphoneSystem {
     ];
   }
 
-  public toggle() {
-    this.isOpen = !this.isOpen;
+  public setWeatherDisplay(weather: WeatherType) {
+    this.currentWeather = weather;
+  }
+
+  public open() {
+    if (this.isOpen) return;
+    this.isOpen = true;
     sound.ensureRunning();
+    sound.playCountdownBeep(true);
+    this.syncOpenDOM();
+    this.callbacks.onOpenStateChanged?.(true);
+  }
+
+  public close() {
+    if (!this.isOpen) return;
+    this.isOpen = false;
+    sound.ensureRunning();
+    sound.playCountdownBeep(false);
+    this.syncOpenDOM();
+    this.callbacks.onOpenStateChanged?.(false);
+  }
+
+  public setClosedSilently() {
+    this.isOpen = false;
+    const overlay = this.getOverlayEl();
+    overlay?.classList.remove('open');
+  }
+
+  public toggle() {
     if (this.isOpen) {
-      sound.playCountdownBeep(true);
+      this.close();
     } else {
-      sound.playCountdownBeep(false);
+      this.open();
+    }
+  }
+
+  private getOverlayEl(): HTMLElement | null {
+    return (
+      (this.containerRoot?.querySelector('#smartphoneOverlay') as HTMLElement | null) ||
+      document.getElementById('smartphoneOverlay')
+    );
+  }
+
+  private syncOpenDOM() {
+    const overlay = this.getOverlayEl();
+    if (overlay) {
+      overlay.classList.toggle('open', this.isOpen);
+      if (this.isOpen) {
+        this.refreshViewport();
+      }
+    }
+  }
+
+  private refreshViewport(options?: { preserveBrowserScroll?: boolean; scrollChatToBottom?: boolean }) {
+    const root = this.containerRoot || document.getElementById('smartphoneContainer');
+    if (!root) return;
+    const viewport = root.querySelector('.phone-screen-viewport') as HTMLElement | null;
+    if (!viewport) return;
+
+    const prevBrowserScroll = options?.preserveBrowserScroll
+      ? (viewport.querySelector('.browser-webpage-content') as HTMLElement | null)?.scrollTop ?? 0
+      : 0;
+    const prevViewportScroll = options?.preserveBrowserScroll ? viewport.scrollTop : 0;
+
+    viewport.innerHTML = this.renderAppContent(this.lastPlayerPos);
+    this.bindViewportEvents(root);
+
+    if (options?.preserveBrowserScroll) {
+      viewport.scrollTop = prevViewportScroll;
+      const browserBody = viewport.querySelector('.browser-webpage-content') as HTMLElement | null;
+      if (browserBody) browserBody.scrollTop = prevBrowserScroll;
+    }
+
+    if (options?.scrollChatToBottom) {
+      const chatStream = viewport.querySelector('.chat-stream') as HTMLElement | null;
+      if (chatStream) chatStream.scrollTop = chatStream.scrollHeight;
     }
   }
 
   public openApp(app: SmartphoneApp) {
     this.currentApp = app;
     sound.playCountdownBeep(false);
+    this.refreshViewport({ scrollChatToBottom: app === 'messages' });
   }
 
   public navigateBrowser(url: string) {
-    this.currentUrl = url;
-    if (this.browserHistory[this.historyIndex] !== url) {
+    const normalized = this.resolveBrowserUrl(url);
+    this.currentUrl = normalized;
+    if (this.browserHistory[this.historyIndex] !== normalized) {
       this.browserHistory = this.browserHistory.slice(0, this.historyIndex + 1);
-      this.browserHistory.push(url);
+      this.browserHistory.push(normalized);
       this.historyIndex = this.browserHistory.length - 1;
     }
     sound.playCountdownBeep(false);
+    this.refreshViewport();
+  }
+
+  private resolveBrowserUrl(raw: string): string {
+    const val = raw.trim().toLowerCase();
+    if (val.includes('auto') || val.includes('import') || val.includes('carro')) return 'drift://underground-auto';
+    if (val.includes('lspd') || val.includes('polic') || val.includes('procurad')) return 'drift://lspd-wanted';
+    if (val.includes('bleet') || val.includes('social') || val.includes('luca')) return 'drift://bleeter';
+    if (val.includes('gazette') || val.includes('news') || val.includes('jornal')) return 'drift://neon-gazette';
+    if (val.startsWith('drift://')) {
+      const known = [
+        'drift://portal',
+        'drift://underground-auto',
+        'drift://lspd-wanted',
+        'drift://bleeter',
+        'drift://neon-gazette',
+      ];
+      return known.includes(val) ? val : 'drift://portal';
+    }
+    return 'drift://portal';
   }
 
   public browserBack() {
@@ -275,6 +380,9 @@ export class SmartphoneSystem {
       this.historyIndex--;
       this.currentUrl = this.browserHistory[this.historyIndex];
       sound.playCountdownBeep(false);
+      this.refreshViewport();
+    } else {
+      this.openApp('home');
     }
   }
 
@@ -283,6 +391,7 @@ export class SmartphoneSystem {
       this.historyIndex++;
       this.currentUrl = this.browserHistory[this.historyIndex];
       sound.playCountdownBeep(false);
+      this.refreshViewport();
     }
   }
 
@@ -299,6 +408,7 @@ export class SmartphoneSystem {
     });
 
     sound.playCountdownBeep(true);
+    this.refreshViewport({ scrollChatToBottom: true });
 
     // Automated smart reply after brief delay
     setTimeout(() => {
@@ -317,6 +427,9 @@ export class SmartphoneSystem {
       });
       sound.playDoorEnterSound();
       this.callbacks.onShowToast?.(`💬 ${contact.name}: ${response}`);
+      if (this.isOpen && this.currentApp === 'messages' && this.activeChatContactId === contactId) {
+        this.refreshViewport({ scrollChatToBottom: true });
+      }
     }, 1200);
   }
 
@@ -330,60 +443,84 @@ export class SmartphoneSystem {
       sound.playSuccessFanfare();
       this.callbacks.onShowToast?.('❤️ Você curtiu esta publicação no Bleeter!');
     }
+    this.refreshViewport({ preserveBrowserScroll: true });
   }
 
   public claimContract(contractId: string) {
     const c = this.contracts.find((item) => item.id === contractId);
-    if (!c || !c.isCompleted) return;
+    if (!c || c.progress < c.targetMax || c.isCompleted) return;
 
+    c.isCompleted = true;
     this.profileRef.cash += c.rewardCash;
     this.profileRef.repPoints += c.rewardRep;
+    if (this.profileRef.repPoints >= this.profileRef.repLevel * 1000) {
+      this.profileRef.repLevel++;
+    }
+    this.callbacks.onCashBonus?.(c.rewardCash, c.title);
+    this.callbacks.onRepBonus?.(c.rewardRep);
     sound.playSuccessFanfare();
-    this.callbacks.onShowToast?.(`💰 Contrato Cumprido! +R$ ${c.rewardCash} e +${c.rewardRep} REP!`);
-    c.isCompleted = false;
-    c.progress = 0;
+    this.callbacks.onShowToast?.(`💰 Contrato Cumprido! +R$ ${c.rewardCash.toLocaleString()} e +${c.rewardRep} REP!`);
+    this.refreshViewport();
   }
 
   public getUnreadCount(): number {
     return this.contacts.filter((c) => c.unread).length;
   }
 
+  private escapeHtml(str: string): string {
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
   public render(playerPos?: { x: number; y: number; z: number }): string {
+    if (playerPos) {
+      this.lastPlayerPos = { ...playerPos };
+    }
     const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const unread = this.getUnreadCount();
 
     return `
       <div class="smartphone-overlay ${this.isOpen ? 'open' : ''}" id="smartphoneOverlay">
-        <div class="phone-frame">
+        <div class="phone-frame" role="dialog" aria-label="Celular Outlaw 5G">
+          <!-- Prominent Top-Right Close Button on .phone-frame -->
+          <button
+            type="button"
+            class="phone-corner-close-btn"
+            id="phoneCornerCloseBtn"
+            title="Fechar Celular (ESC)"
+            aria-label="Fechar Celular"
+          >✕</button>
+
           <!-- Smartphone Top Speaker & Camera Punch-hole -->
           <div class="phone-top-notch">
             <span class="phone-speaker"></span>
             <span class="phone-lens"></span>
           </div>
 
-          <!-- Status Bar -->
+          <!-- Status Bar with Safe Shield -->
           <div class="phone-status-bar">
             <div class="phone-status-left">
               <span class="phone-clock">${timeStr}</span>
               <span class="phone-carrier">Outlaw 5G</span>
+              <span class="phone-safe-shield" title="Jogo protegido enquanto o celular estiver aberto">🛡️ SEGURO</span>
             </div>
             <div class="phone-status-right">
-              <span class="phone-status-icon">📶</span>
-              <span class="phone-status-icon">📡</span>
               <span class="phone-battery">98% 🔋</span>
             </div>
           </div>
 
           <!-- Screen Viewport -->
           <div class="phone-screen-viewport">
-            ${this.renderAppContent(playerPos)}
+            ${this.renderAppContent(this.lastPlayerPos)}
           </div>
 
           <!-- Bottom Navigation Bar -->
           <div class="phone-nav-bar">
-            <button type="button" class="phone-nav-btn" id="phoneBackBtn" title="Voltar">◀</button>
-            <button type="button" class="phone-nav-btn home-pill" id="phoneHomeBtn" title="Início">●</button>
-            <button type="button" class="phone-nav-btn" id="phoneCloseBtn" title="Fechar Celular">✕</button>
+            <button type="button" class="phone-nav-btn" id="phoneBackBtn" title="Voltar">◀ Voltar</button>
+            <button type="button" class="phone-nav-btn home-pill" id="phoneHomeBtn" title="Tela Inicial">● Início</button>
+            <button type="button" class="phone-nav-btn phone-nav-close" id="phoneCloseBtn" title="Fechar Celular">✕ Sair</button>
           </div>
         </div>
       </div>
@@ -486,7 +623,7 @@ export class SmartphoneSystem {
           </div>
           <div class="browser-url-bar">
             <span class="ssl-lock">🔒</span>
-            <input type="text" class="browser-url-input" id="browserUrlInput" value="${this.currentUrl}" readonly />
+            <input type="text" class="browser-url-input" id="browserUrlInput" value="${this.currentUrl}" aria-label="Endereço NetDrift" />
           </div>
         </div>
 
@@ -521,36 +658,79 @@ export class SmartphoneSystem {
   }
 
   private renderPortalPage(): string {
+    const q = this.portalSearchQuery.trim().toLowerCase();
+    const allPortalLinks = [
+      {
+        url: 'drift://underground-auto',
+        tag: 'MERCADO',
+        tagClass: 'highlight',
+        title: 'Black Market Motors · Importação & Nitro',
+        desc: 'Novo lote de motores Twin-Turbo e suspensões de ângulo extremo chega à Concessionária.',
+        keywords: 'carro carros auto motor drift turbo oficina concessionaria import',
+      },
+      {
+        url: 'drift://lspd-wanted',
+        tag: 'POLICIAL',
+        tagClass: '',
+        title: 'LSPD Procurados · Painel da Patrulha',
+        desc: 'Mais de 15 viaturas e furgões blindados deslocados para vigiar os viadutos da Avenida Central.',
+        keywords: 'policia lspd procurado viatura swat bloqueio estrela fuga',
+      },
+      {
+        url: 'drift://bleeter',
+        tag: 'VIRAL',
+        tagClass: 'viral',
+        title: 'Bleeter Social · Luca & Miguel Viralizam',
+        desc: 'Luca & Miguel gravam clipe derrapando a 180 km/h na chuva e ultrapassam 100 mil curtidas.',
+        keywords: 'bleeter social luca miguel drift chuva post rede pontos',
+      },
+      {
+        url: 'drift://neon-gazette',
+        tag: 'JORNAL',
+        tagClass: '',
+        title: 'Neon Gazette · Edição da Meia-Noite',
+        desc: 'Rachas noturnos: o fenômeno do submundo automotivo que domina Metrópole Neon.',
+        keywords: 'jornal gazette noticia racha metropole neon cidade',
+      },
+    ];
+
+    const filteredLinks = q
+      ? allPortalLinks.filter(
+          (item) =>
+            item.title.toLowerCase().includes(q) ||
+            item.desc.toLowerCase().includes(q) ||
+            item.keywords.includes(q)
+        )
+      : allPortalLinks;
+
     return `
       <div class="webpage-portal">
         <div class="portal-hero">
           <h2 class="portal-logo">EYEFIND<span>.drift</span></h2>
           <p class="portal-tagline">O portal nº 1 do submundo automotivo e corridas noturnas</p>
           <div class="portal-search-box">
-            <input type="text" class="portal-search-input" value="melhores pontos de drift metropole neon" readonly />
-            <button type="button" class="portal-search-btn">🔍 Pesquisar</button>
+            <input type="text" id="portalSearchInput" class="portal-search-input" value="${this.escapeHtml(this.portalSearchQuery)}" placeholder="Buscar: drift, polícia, carros, luca..." />
+            <button type="button" id="portalSearchBtn" class="portal-search-btn">🔍 Pesquisar</button>
           </div>
         </div>
 
-        <div class="portal-section-title">🔥 TENDÊNCIAS DA NOITE</div>
+        <div class="portal-section-title">${q ? `🔎 RESULTADOS PARA "${this.escapeHtml(this.portalSearchQuery.toUpperCase())}"` : '🔥 TENDÊNCIAS DA NOITE'}</div>
         <div class="portal-news-list">
-          <div class="portal-news-card" data-url="drift://neon-gazette">
-            <span class="news-tag">POLICIAL</span>
-            <h4>Comandante da LSPD promete tolerância zero para rachas na Avenida Central</h4>
-            <p>Mais de 15 viaturas e furgões blindados foram deslocados para vigiar os viadutos após evento clandestino.</p>
-          </div>
-
-          <div class="portal-news-card" data-url="drift://underground-auto">
-            <span class="news-tag highlight">MERCADO</span>
-            <h4>Novo lote de motores Twin-Turbo e suspensões de ângulo extremo chega à Concessionária</h4>
-            <p>Sofia anuncia descontos exclusivos para pilotos com reputação acima de Nível 3.</p>
-          </div>
-
-          <div class="portal-news-card" data-url="drift://bleeter">
-            <span class="news-tag viral">VIRAL</span>
-            <h4>Luca & Miguel gravam clipe derrapando a 180 km/h na chuva e viralizam no Bleeter</h4>
-            <p>Vídeo ultrapassou 100 mil compartilhamentos em menos de duas horas.</p>
-          </div>
+          ${
+            filteredLinks.length > 0
+              ? filteredLinks
+                  .map(
+                    (item) => `
+              <div class="portal-news-card" data-url="${item.url}">
+                <span class="news-tag ${item.tagClass}">${item.tag}</span>
+                <h4>${item.title}</h4>
+                <p>${item.desc}</p>
+              </div>
+            `
+                  )
+                  .join('')
+              : `<div class="portal-empty-search">Nenhum site encontrado para "${this.escapeHtml(this.portalSearchQuery)}". <button type="button" class="portal-reset-search-btn" id="portalResetSearchBtn">Limpar busca</button></div>`
+          }
         </div>
       </div>
     `;
@@ -773,6 +953,13 @@ export class SmartphoneSystem {
   private renderGpsScreen(playerPos?: { x: number; y: number; z: number }): string {
     const locations = [
       {
+        id: 'la_casa_de_hermanos',
+        name: 'La Casa de Hermanos · Mansão Luca & Miguel',
+        desc: 'Mansão de mafioso de Luca & Miguel · Cofre (+R$ 3.500 & +120 REP), Saúde e Nitro',
+        icon: '🎩',
+        coords: { x: 78, y: 0, z: 56, heading: Math.PI / 2 },
+      },
+      {
         id: 'tuning_garage',
         name: 'Oficina Tuning · Luca & Miguel',
         desc: 'Safehouse principal · Reparo total e recarga de Nitro',
@@ -784,7 +971,7 @@ export class SmartphoneSystem {
         name: 'Casa de Luca & Miguel',
         desc: 'Sobrado residencial com sala, TV de telemetria e descanso (+50 REP)',
         icon: '🏠',
-        coords: { x: -176, y: 0, z: 110, heading: Math.PI },
+        coords: { x: -196, y: 0, z: 110, heading: Math.PI },
       },
       {
         id: 'midnight_diner',
@@ -875,9 +1062,9 @@ export class SmartphoneSystem {
           ${this.contracts
             .map((c) => {
               const pct = Math.min(100, Math.round((c.progress / c.targetMax) * 100));
-              const ready = c.progress >= c.targetMax;
+              const ready = c.progress >= c.targetMax && !c.isCompleted;
               return `
-              <div class="contract-card ${ready ? 'ready' : ''}">
+              <div class="contract-card ${ready ? 'ready' : ''} ${c.isCompleted ? 'claimed' : ''}">
                 <div class="contract-top">
                   <span class="contract-icon">${c.icon}</span>
                   <div class="contract-titles">
@@ -892,9 +1079,11 @@ export class SmartphoneSystem {
                 <div class="contract-footer">
                   <span class="contract-counts">${c.progress} / ${c.targetMax}</span>
                   ${
-                    ready
-                      ? `<button type="button" class="contract-claim-btn" data-contract-id="${c.id}">RECEBER PRÊMIO</button>`
-                      : `<span class="contract-status-pill">EM PROGRESSO (${pct}%)</span>`
+                    c.isCompleted
+                      ? `<span class="contract-status-pill claimed-pill">✅ RESGATADO</span>`
+                      : ready
+                        ? `<button type="button" class="contract-claim-btn" data-contract-id="${c.id}">RECEBER PRÊMIO</button>`
+                        : `<span class="contract-status-pill">EM PROGRESSO (${pct}%)</span>`
                   }
                 </div>
               </div>
@@ -954,27 +1143,51 @@ export class SmartphoneSystem {
 
   // --- 🌦️ Weather Radar App ---
   private renderWeatherScreen(): string {
+    const weatherMeta: Record<WeatherType, { icon: string; temp: string; desc: string }> = {
+      sunny: {
+        icon: '☀️',
+        temp: '27°C · Céu Limpo',
+        desc: 'Asfalto seco com aderência máxima (100% Grip). Ideal para velocidade final.',
+      },
+      rain: {
+        icon: '🌧️',
+        temp: '19°C · Chuva Fina',
+        desc: 'Asfalto molhado com redução de aderência (-25% Grip). Drift facilitado.',
+      },
+      storm: {
+        icon: '⚡',
+        temp: '16°C · Tempestade Severa',
+        desc: 'Chuva intensa e relâmpagos (-35% Grip). Curvas exigem controle fino.',
+      },
+      fog: {
+        icon: '🌫️',
+        temp: '14°C · Neblina Densa',
+        desc: 'Visibilidade reduzida nas avenidas e aderência levemente úmida (-15% Grip).',
+      },
+    };
+    const meta = weatherMeta[this.currentWeather] || weatherMeta.rain;
+
     return `
       <div class="phone-app-weather">
         <div class="weather-current-card">
-          <div class="weather-big-icon">🌧️</div>
+          <div class="weather-big-icon">${meta.icon}</div>
           <h2>METRÓPOLE NEON</h2>
-          <div class="weather-temp">19°C · Chuva Fina</div>
-          <p>Asfalto molhado com redução de aderência. Drift facilitado.</p>
+          <div class="weather-temp">${meta.temp}</div>
+          <p>${meta.desc}</p>
         </div>
 
         <div class="weather-selector-title">ALTERAR CLIMA DA CIDADE</div>
         <div class="weather-buttons-grid">
-          <button type="button" class="weather-preset-btn" data-set-weather="sunny">
+          <button type="button" class="weather-preset-btn ${this.currentWeather === 'sunny' ? 'active' : ''}" data-set-weather="sunny">
             ☀️ Ensolarado
           </button>
-          <button type="button" class="weather-preset-btn" data-set-weather="rain">
+          <button type="button" class="weather-preset-btn ${this.currentWeather === 'rain' ? 'active' : ''}" data-set-weather="rain">
             🌧️ Chuva (-25% Grip)
           </button>
-          <button type="button" class="weather-preset-btn" data-set-weather="storm">
+          <button type="button" class="weather-preset-btn ${this.currentWeather === 'storm' ? 'active' : ''}" data-set-weather="storm">
             ⚡ Tempestade (-35% Grip)
           </button>
-          <button type="button" class="weather-preset-btn" data-set-weather="fog">
+          <button type="button" class="weather-preset-btn ${this.currentWeather === 'fog' ? 'active' : ''}" data-set-weather="fog">
             🌫️ Neblina Densa
           </button>
         </div>
@@ -984,9 +1197,10 @@ export class SmartphoneSystem {
 
   // --- 📻 Radio App ---
   private renderMusicScreen(): string {
+    const activeChannel = this.radioChannels[this.activeRadioChannelIndex] || this.radioChannels[0];
     return `
       <div class="phone-app-music">
-        <div class="music-visualizer">
+        <div class="music-visualizer ${this.isRadioPlaying ? '' : 'is-paused'}">
           <span class="v-bar"></span>
           <span class="v-bar"></span>
           <span class="v-bar"></span>
@@ -994,36 +1208,66 @@ export class SmartphoneSystem {
           <span class="v-bar"></span>
         </div>
         <h3>OUTLAW DRIFT FM</h3>
-        <p class="now-playing">Tocando: Midnight Phonk & Synthwave 24/7</p>
+        <p class="now-playing">${this.isRadioPlaying ? `Tocando: ${activeChannel.track}` : 'Rádio em Pausa'}</p>
+        <button type="button" class="music-play-toggle-btn" id="btnToggleRadioPlay">
+          ${this.isRadioPlaying ? '⏸ Pausar Rádio' : '▶ Tocar Rádio'}
+        </button>
 
         <div class="music-channels-list">
-          <button type="button" class="music-channel-chip active">📻 104.2 Neon Waves (Synth)</button>
-          <button type="button" class="music-channel-chip">🔥 98.7 Tokyo Drift Phonk</button>
-          <button type="button" class="music-channel-chip">⚡ 106.9 Cyberpunk Bass D&B</button>
-          <button type="button" class="music-channel-chip">🕶️ 92.5 Underground Hip-Hop</button>
+          ${this.radioChannels
+            .map(
+              (ch, idx) => `
+            <button type="button" class="music-channel-chip ${idx === this.activeRadioChannelIndex ? 'active' : ''}" data-radio-index="${idx}">
+              ${ch.label}
+            </button>
+          `
+            )
+            .join('')}
         </div>
       </div>
     `;
   }
 
   public bindDOMEvents(root: HTMLElement) {
-    // Nav bar buttons
+    this.containerRoot = root;
+
+    // Backdrop click outside phone frame closes the phone cleanly
+    const overlay = root.querySelector('#smartphoneOverlay') as HTMLElement | null;
+    overlay?.addEventListener('click', (e) => {
+      if (e.target === overlay) {
+        this.close();
+      }
+    });
+
+    // Top-right corner prominent Close button on .phone-frame
+    root.querySelector('#phoneCornerCloseBtn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.close();
+    });
+
+    // Bottom Nav bar buttons (bound once per frame render)
     root.querySelector('#phoneHomeBtn')?.addEventListener('click', () => {
       this.openApp('home');
     });
 
     root.querySelector('#phoneCloseBtn')?.addEventListener('click', () => {
-      this.toggle();
+      this.close();
     });
 
     root.querySelector('#phoneBackBtn')?.addEventListener('click', () => {
       if (this.currentApp === 'browser') {
         this.browserBack();
-      } else {
+      } else if (this.currentApp !== 'home') {
         this.openApp('home');
+      } else {
+        this.close();
       }
     });
 
+    this.bindViewportEvents(root);
+  }
+
+  private bindViewportEvents(root: HTMLElement) {
     // App launch buttons
     root.querySelectorAll('[data-app]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -1035,8 +1279,9 @@ export class SmartphoneSystem {
     // Call car / tow truck action
     root.querySelector('[data-app-action="call_car"]')?.addEventListener('click', () => {
       sound.playWrenchToolSound();
-      this.callbacks.onShowToast?.('🚗 Veículo alinhado e entregue na sua posição!');
       this.callbacks.onSpawnCar?.('car');
+      this.callbacks.onShowToast?.('🚗 Veículo alinhado e entregue na sua posição!');
+      this.close();
     });
 
     // Browser navigation & bookmarks
@@ -1054,7 +1299,33 @@ export class SmartphoneSystem {
     root.querySelector('#bNavFwd')?.addEventListener('click', () => this.browserForward());
     root.querySelector('#bNavRefresh')?.addEventListener('click', () => {
       sound.playCountdownBeep(false);
-      this.navigateBrowser(this.currentUrl);
+      this.refreshViewport();
+    });
+
+    const urlInput = root.querySelector('#browserUrlInput') as HTMLInputElement | null;
+    urlInput?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        this.navigateBrowser(urlInput.value);
+      }
+    });
+
+    const portalSearchInput = root.querySelector('#portalSearchInput') as HTMLInputElement | null;
+    const runPortalSearch = () => {
+      this.portalSearchQuery = portalSearchInput?.value || '';
+      sound.playCountdownBeep(false);
+      this.refreshViewport();
+    };
+    root.querySelector('#portalSearchBtn')?.addEventListener('click', runPortalSearch);
+    portalSearchInput?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        runPortalSearch();
+      }
+    });
+    root.querySelector('#portalResetSearchBtn')?.addEventListener('click', () => {
+      this.portalSearchQuery = '';
+      this.refreshViewport();
     });
 
     // Bleeter likes
@@ -1070,7 +1341,7 @@ export class SmartphoneSystem {
       btn.addEventListener('click', () => {
         this.callbacks.onFastTravel?.({ x: 120, y: 0, z: -140, heading: Math.PI / 2 });
         this.callbacks.onShowToast?.('🏎️ Viajando para Concessionária Black Market Motors...');
-        this.toggle();
+        this.close();
       });
     });
 
@@ -1078,7 +1349,7 @@ export class SmartphoneSystem {
       btn.addEventListener('click', () => {
         this.callbacks.onFastTravel?.({ x: -65, y: 0, z: 18, heading: Math.PI / 2 });
         this.callbacks.onShowToast?.('🔧 Viajando para Oficina Tuning...');
-        this.toggle();
+        this.close();
       });
     });
 
@@ -1091,10 +1362,7 @@ export class SmartphoneSystem {
           const c = this.contacts.find((item) => item.id === cid);
           if (c) c.unread = false;
           sound.playCountdownBeep(false);
-          // Rerender chat stream
-          const screen = root.querySelector('.phone-screen-viewport');
-          if (screen) screen.innerHTML = this.renderAppContent();
-          this.bindDOMEvents(root);
+          this.refreshViewport({ scrollChatToBottom: true });
         }
       });
     });
@@ -1105,10 +1373,6 @@ export class SmartphoneSystem {
         const contactId = btn.getAttribute('data-contact');
         if (reply && contactId) {
           this.sendReply(contactId, reply);
-          // Rerender chat stream
-          const screen = root.querySelector('.phone-screen-viewport');
-          if (screen) screen.innerHTML = this.renderAppContent();
-          this.bindDOMEvents(root);
         }
       });
     });
@@ -1123,7 +1387,7 @@ export class SmartphoneSystem {
             const coords = JSON.parse(coordsStr);
             this.callbacks.onFastTravel?.(coords);
             this.callbacks.onShowToast?.(`⚡ Viagem rápida realizada para: ${name}!`);
-            this.toggle();
+            this.close();
           } catch (e) {
             console.error('Error fast travel:', e);
           }
@@ -1137,9 +1401,6 @@ export class SmartphoneSystem {
         const cid = btn.getAttribute('data-contract-id');
         if (cid) {
           this.claimContract(cid);
-          const screen = root.querySelector('.phone-screen-viewport');
-          if (screen) screen.innerHTML = this.renderAppContent();
-          this.bindDOMEvents(root);
         }
       });
     });
@@ -1149,8 +1410,34 @@ export class SmartphoneSystem {
       btn.addEventListener('click', () => {
         const w = btn.getAttribute('data-set-weather') as WeatherType;
         if (w) {
+          this.currentWeather = w;
           this.callbacks.onSetWeather?.(w);
           this.callbacks.onShowToast?.(`🌦️ Clima alterado para: ${w.toUpperCase()}`);
+          this.refreshViewport();
+        }
+      });
+    });
+
+    // Radio FM channel selection & play/pause
+    root.querySelector('#btnToggleRadioPlay')?.addEventListener('click', () => {
+      this.isRadioPlaying = !this.isRadioPlaying;
+      sound.playCountdownBeep(this.isRadioPlaying);
+      this.callbacks.onShowToast?.(
+        this.isRadioPlaying ? '📻 Rádio Outlaw Drift FM ligada!' : '🔇 Rádio em pausa.'
+      );
+      this.refreshViewport();
+    });
+
+    root.querySelectorAll('[data-radio-index]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const idxStr = btn.getAttribute('data-radio-index');
+        const idx = idxStr ? parseInt(idxStr, 10) : 0;
+        if (!Number.isNaN(idx) && this.radioChannels[idx]) {
+          this.activeRadioChannelIndex = idx;
+          this.isRadioPlaying = true;
+          sound.playCountdownBeep(true);
+          this.callbacks.onShowToast?.(`📻 Sintonizado em ${this.radioChannels[idx].label}`);
+          this.refreshViewport();
         }
       });
     });
